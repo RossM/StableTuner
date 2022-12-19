@@ -565,9 +565,13 @@ class AutoBucketing(Dataset):
         if class_img==False:
             image_train_tmp = image_train_item.hydrate(crop=False, save=0, crop_jitter=self.crop_jitter)
             image_train_tmp_image = Image.fromarray(normalize8(image_train_tmp.image)).convert("RGB")
+            caption_parts = image_train_tmp.caption.split(", ")
+            random.shuffle(caption_parts)
+            image_train_tmp_caption = ", ".join(caption_parts)
+            #print(image_train_tmp_caption)
             example["instance_images"] = self.image_transforms(image_train_tmp_image)
             example["instance_prompt_ids"] = self.tokenizer(
-                image_train_tmp.caption,
+                image_train_tmp_caption,
                 padding="do_not_pad",
                 truncation=True,
                 max_length=self.tokenizer.model_max_length,
