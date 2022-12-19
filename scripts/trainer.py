@@ -901,7 +901,7 @@ class DreamBoothDataset(Dataset):
 
             if with_prior_preservation:
                 for i in range(repeats):
-                    self.__recurse_data_root(self, concept['class_data_dir'],use_sub_dirs=use_sub_dirs,class_images=True)
+                    self.__recurse_data_root(self, concept,use_sub_dirs=False,class_images=True)
         random.shuffle(self.image_paths)
 
         self.num_instance_images = len(self.image_paths)
@@ -922,15 +922,15 @@ class DreamBoothDataset(Dataset):
         #if recurse root is a dict
         if isinstance(recurse_root, dict):
             concept_token = recurse_root['instance_prompt']
-            recurse_root = recurse_root['instance_data_dir']
+            data = recurse_root['instance_data_dir']
             
             if class_images:
                 concept_token = recurse_root['class_prompt']
-                recurse_root = recurse_root['class_data_dir']
+                data = recurse_root['class_data_dir']
         else:
             concept_token = None
-        for f in os.listdir(recurse_root):
-            current = os.path.join(recurse_root, f)
+        for f in os.listdir(data):
+            current = os.path.join(data, f)
 
             if os.path.isfile(current):
                 ext = os.path.splitext(f)[1].lower()
@@ -942,13 +942,17 @@ class DreamBoothDataset(Dataset):
         if use_sub_dirs:
             sub_dirs = []
 
-            for d in os.listdir(recurse_root):
-                current = os.path.join(recurse_root, d)
+            for d in os.listdir(data):
+                current = os.path.join(data, d)
                 if os.path.isdir(current):
                     sub_dirs.append(current)
 
             for dir in sub_dirs:
-                self.__recurse_data_root(self=self, recurse_root={'instance_data_dir' : dir, 'instance_prompt' : concept_token})
+                if class_images != False:
+                    self.__recurse_data_root(self=self, recurse_root={'instance_data_dir' : dir, 'instance_prompt' : concept_token})
+                else:
+                    self.__recurse_data_root(self=self, recurse_root={'class_data_dir' : dir, 'class_prompt' : concept_token})
+        
     def __len__(self):
         return self._length
 
@@ -960,8 +964,12 @@ class DreamBoothDataset(Dataset):
             instance_prompt = str(instance_path).split(os.sep)[-1].split('.')[0].split('_')[0]
         #else if there's a txt file with the same name as the image, read the caption from there
         if self.use_text_files_as_captions == True:
-            #if there's a txt file with the same name as the image, read the caption from there
-            txt_path = instance_path.endswith('.txt')
+            #if there's a file with the same name as the image, but with a .txt extension, read the caption from there
+            #get the last . in the file name
+            last_dot = str(instance_path).rfind('.')
+            #get the path up to the last dot
+            txt_path = str(instance_path)[:last_dot] + '.txt'
+
             #if txt_path exists, read the caption from there
             if os.path.exists(txt_path):
                 with open(txt_path, encoding='utf-8') as f:
@@ -1308,8 +1316,10 @@ def main():
     )
     def collate_fn(examples):
         #print(examples)
+        #print('test')
         input_ids = [example["instance_prompt_ids"] for example in examples]
         pixel_values = [example["instance_images"] for example in examples]
+        #print('test')
         # Concat class and instance examples for prior preservation.
         # We do this to avoid doing two forward passes.
         if args.with_prior_preservation:
@@ -1400,6 +1410,7 @@ def main():
                 with torch.no_grad():
                     batch["pixel_values"] = batch["pixel_values"].to(accelerator.device, non_blocking=True, dtype=weight_dtype)
                     batch["input_ids"] = batch["input_ids"].to(accelerator.device, non_blocking=True)
+                    
                     latents_cache.append(vae.encode(batch["pixel_values"]).latent_dist)
                     if args.train_text_encoder:
                         text_encoder_cache.append(batch["input_ids"])
@@ -1535,6 +1546,9 @@ def main():
                         f" correctly and a GPU is available: {e}"
                     )
             save_dir = os.path.join(args.output_dir, f"{step}")
+            sample_dir = os.path.join(args.output_dir, f"samples/{step}")
+            #if sample dir path does not exist, create it
+            
             if args.stop_text_encoder_training == True:
                 save_dir = frozen_directory
             if step != 0:
@@ -1554,7 +1568,7 @@ def main():
             if args.add_sample_prompt is not None and args.stop_text_encoder_training != True:
                 pipeline = pipeline.to(accelerator.device)
                 pipeline.set_progress_bar_config(disable=True)
-                sample_dir = os.path.join(save_dir, "samples")
+                #sample_dir = os.path.join(save_dir, "samples")
                 #if sample_dir exists, delete it
                 if os.path.exists(sample_dir):
                     shutil.rmtree(sample_dir)

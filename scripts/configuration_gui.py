@@ -206,6 +206,8 @@ class ConceptWindow(ctk.CTkToplevel):
         self.concept_name_label.grid(row=0, column=0, sticky="nsew",padx=5,pady=5)
         #make a entry box for concept name
         self.concept_name_entry = ctk.CTkEntry(self.concept_frame_subframe,width=200)
+        #create right click menu
+        self.concept_name_entry.bind("<Button-3>", self.create_right_click_menu)
         self.concept_name_entry.grid(row=0, column=1, sticky="e",padx=5,pady=5)
         self.concept_name_entry.insert(0, self.concept.concept_name)
         #make a label for concept path
@@ -213,6 +215,8 @@ class ConceptWindow(ctk.CTkToplevel):
         self.concept_path_label.grid(row=1, column=0, sticky="nsew",padx=5,pady=5)
         #make a entry box for concept path
         self.concept_path_entry = ctk.CTkEntry(self.concept_frame_subframe,width=200)
+        #create right click menu
+        self.concept_path_entry.bind("<Button-3>", self.create_right_click_menu)
         self.concept_path_entry.grid(row=1, column=1, sticky="e",padx=5,pady=5)
         #on focus out, update the preview image
         self.concept_path_entry.bind("<FocusOut>", lambda event: self.update_preview_image(self.concept_path_entry))
@@ -226,6 +230,8 @@ class ConceptWindow(ctk.CTkToplevel):
         self.class_name_label.grid(row=2, column=0, sticky="nsew",padx=5,pady=5)
         #make a entry box for Class Name
         self.class_name_entry = ctk.CTkEntry(self.concept_frame_subframe,width=200)
+        #create right click menu
+        self.class_name_entry.bind("<Button-3>", self.create_right_click_menu)
         self.class_name_entry.grid(row=2, column=1, sticky="e",padx=5,pady=5)
         self.class_name_entry.insert(0, self.concept.concept_class_name)
         #make a label for Class Path
@@ -233,6 +239,8 @@ class ConceptWindow(ctk.CTkToplevel):
         self.class_path_label.grid(row=3, column=0, sticky="nsew",padx=5,pady=5)
         #make a entry box for Class Path
         self.class_path_entry = ctk.CTkEntry(self.concept_frame_subframe,width=200)
+        #create right click menu
+        self.class_path_entry.bind("<Button-3>", self.create_right_click_menu)
         self.class_path_entry.grid(row=3, column=1, sticky="e",padx=5,pady=5)
         self.class_path_entry.insert(0, self.concept.concept_class_path)
         #make a button to browse for Class Path
@@ -274,6 +282,24 @@ class ConceptWindow(ctk.CTkToplevel):
         #self.delete_button = ctk.CTkButton(self.concept_frame_subframe, text="Delete", command=self.delete)
         #self.delete_button.grid(row=6, column=3,columnspan=2, sticky="nsew")
         self.concept_frame_subframe.pack(fill="both", expand=True)
+    def create_right_click_menu(self, event):
+        #create a menu
+        self.menu = Menu(self.master, tearoff=0)
+        self.menu.config(font=("Segoe UI", 15))
+
+        #set dark colors for the menu
+        self.menu.configure(bg="#2d2d2d", fg="#ffffff", activebackground="#2d2d2d", activeforeground="#ffffff")
+        #add commands to the menu
+        self.menu.add_command(label="Cut", command=lambda: self.focus_get().event_generate("<<Cut>>"))
+        self.menu.add_command(label="Copy", command=lambda: self.focus_get().event_generate("<<Copy>>"))
+        self.menu.add_command(label="Paste", command=lambda: self.focus_get().event_generate("<<Paste>>"))
+        self.menu.add_command(label="Select All", command=lambda: self.focus_get().event_generate("<<SelectAll>>"))
+        #display the menu
+        try:
+            self.menu.tk_popup(event.x_root, event.y_root)
+        finally:
+            #make sure to release the grab (Tk 8.0a1 only)
+            self.menu.grab_release()
     def delete(self):
         del self.concept
         self.conceptWidget.destroy()
@@ -656,7 +682,9 @@ class App(ctk.CTk):
 
         self.sidebar_button_11 = ctk.CTkButton(self.sidebar_frame,text='Caption Buddy',command=self.caption_buddy)
         self.sidebar_button_11.grid(row=13, column=0, padx=20, pady=5)
-        self.sidebar_button_12 = ctk.CTkButton(self.sidebar_frame,text='Start Training!',command=self.process_inputs)
+        self.sidebar_button_12 = ctk.CTkButton(self.sidebar_frame,text='Start Training!', command=lambda : self.process_inputs(export=False))
+        #bind right click
+        self.sidebar_button_12.bind("<Button-3>", self.create_right_click_menu_export)
         self.sidebar_button_12.grid(row=14, column=0, padx=20, pady=5)
         self.general_frame = ctk.CTkFrame(self, width=140, corner_radius=0,fg_color='transparent')
         self.general_frame.grid_columnconfigure(0, weight=5)
@@ -931,7 +959,7 @@ class App(ctk.CTk):
             try:
                 self.load_config(file_name="stabletune_last_run.json")
                 #try loading the latest generated model to playground entry
-                self.playground_find_latest_generated_model()
+                self.find_latest_generated_model(self.play_model_entry)
                 #convert to ckpt if option is wanted
                 if self.execute_post_conversion == True:
                     #construct unique name
@@ -968,19 +996,19 @@ class App(ctk.CTk):
         self.sample_prompts = []
         self.number_of_sample_prompts = len(self.sample_prompts)
         self.sample_prompt_labels = []
-        self.input_model_path = ""
+        self.input_model_path = "stabilityai/stable-diffusion-2-1-base"
         self.vae_model_path = ""
-        self.output_path = "models/model_name"
+        self.output_path = "models/new_model"
         self.send_telegram_updates = False
         self.telegram_token = "TOKEN"
         self.telegram_chat_id = "ID"
         self.seed_number = 3434554
         self.resolution = 512
-        self.batch_size = 1
-        self.num_train_epochs = 5
+        self.batch_size = 24
+        self.num_train_epochs = 100
         self.accumulation_steps = 1
         self.mixed_precision = "fp16"
-        self.learning_rate = "5e-6"
+        self.learning_rate = "3e-6"
         self.learning_rate_schedule = "constant"
         self.learning_rate_warmup_steps = 0
         self.concept_list_json_path = "concept_list.json"
@@ -995,7 +1023,7 @@ class App(ctk.CTk):
         self.delete_checkpoints_when_full_drive = True
         self.use_image_names_as_captions = True
         self.num_samples_to_generate = 1
-        self.auto_balance_concept_datasets = True
+        self.auto_balance_concept_datasets = False
         self.sample_width = 512
         self.sample_height = 512
         self.save_latents_cache = True
@@ -1006,7 +1034,7 @@ class App(ctk.CTk):
         self.prior_loss_weight = 1.0
         self.sample_random_aspect_ratio = False
         self.add_controlled_seed_to_sample = []
-        self.sample_on_training_start = False
+        self.sample_on_training_start = True
         self.concept_template = {'instance_prompt': 'subject', 'class_prompt': 'a photo of class', 'instance_data_dir':'./data/subject','class_data_dir':'./data/subject_class'}
         self.concepts = []
         self.play_input_model_path = ""
@@ -1026,7 +1054,7 @@ class App(ctk.CTk):
         self.play_save_image_button = None
         self.dataset_repeats = 1
         self.limit_text_encoder = 0
-        self.use_text_files_as_captions = False
+        self.use_text_files_as_captions = True
         self.ckpt_sd_version = None
         self.convert_to_ckpt_after_training = False
         self.execute_post_conversion = False
@@ -1095,17 +1123,39 @@ class App(ctk.CTk):
     def create_right_click_menu(self, event):
         #create a menu
         self.menu = Menu(self.master, tearoff=0)
+        self.menu.config(font=("Segoe UI", 15))
+
+        #set dark colors for the menu
+        self.menu.configure(bg="#2d2d2d", fg="#ffffff", activebackground="#2d2d2d", activeforeground="#ffffff")
         #add commands to the menu
-        self.menu.add_command(label="Cut", command=lambda: self.master.focus_get().event_generate("<<Cut>>"))
-        self.menu.add_command(label="Copy", command=lambda: self.master.focus_get().event_generate("<<Copy>>"))
-        self.menu.add_command(label="Paste", command=lambda: self.master.focus_get().event_generate("<<Paste>>"))
-        self.menu.add_command(label="Select All", command=lambda: self.master.focus_get().event_generate("<<SelectAll>>"))
+        self.menu.add_command(label="Cut", command=lambda: self.focus_get().event_generate("<<Cut>>"))
+        self.menu.add_command(label="Copy", command=lambda: self.focus_get().event_generate("<<Copy>>"))
+        self.menu.add_command(label="Paste", command=lambda: self.focus_get().event_generate("<<Paste>>"))
+        self.menu.add_command(label="Select All", command=lambda: self.focus_get().event_generate("<<SelectAll>>"))
         #display the menu
         try:
             self.menu.tk_popup(event.x_root, event.y_root)
         finally:
             #make sure to release the grab (Tk 8.0a1 only)
             self.menu.grab_release()
+    def create_right_click_menu_export(self, event):
+        #create a menu
+        self.menu = Menu(self.master, tearoff=0)
+        #set menu size and font size
+        self.menu.config(font=("Segoe UI", 15))
+
+        #set dark colors for the menu
+        self.menu.configure(bg="#2d2d2d", fg="#ffffff", activebackground="#2d2d2d", activeforeground="#ffffff")
+        #add commands to the menu
+        self.menu.add_command(label="Export Trainer Command for Windows", command=lambda: self.process_inputs(export='Win'))
+        self.menu.add_command(label="Export Trainer Command for Linux", command=lambda: self.process_inputs(export='Linux'))
+        #display the menu
+        try:
+            self.menu.tk_popup(event.x_root, event.y_root)
+        finally:
+            #make sure to release the grab (Tk 8.0a1 only)
+            self.menu.grab_release()
+
     def on_tab_changed(self, event):
         #get the current selected notebook tab id
         tab_id = self.notebook.select()
@@ -1190,6 +1240,7 @@ class App(ctk.CTk):
                 #print(i)
                 i.configure(width=160)
                 i.grid(padx=10, pady=5,sticky="w")
+                i.bind("<Button-3>", self.create_right_click_menu)
             if 'ctkswitch' in str(i):
                 #print(i)
                 i.configure(text='')
@@ -1242,18 +1293,22 @@ class App(ctk.CTk):
                 self.with_prior_loss_preservation_label.configure(state='normal')
                 self.prior_loss_preservation_weight_entry.configure(state='normal')
                 self.prior_loss_preservation_weight_label.configure(state='normal')
+                self.with_prior_loss_preservation_var.set(1)
         except:
             pass
         self.dreambooth_mode_selected = ctk.CTkLabel(self.general_frame_subframe_side_guide,fg_color='transparent', text="Dreambooth it is!\n I disabled irrelevant features for you.", font=ctk.CTkFont(size=14))
         self.dreambooth_mode_selected.pack(side="top", fill="x", expand=False, padx=10, pady=10)
         self.use_text_files_as_captions_checkbox.configure(state='disabled')
         self.use_text_files_as_captions_label.configure(state='disabled')
+        self.use_text_files_as_captions_var.set(0)
         #self.use_text_files_as_captions_checkbox.set(0)
         self.use_image_names_as_captions_label.configure(state='disabled')
         self.use_image_names_as_captions_checkbox.configure(state='disabled')
+        self.use_image_names_as_captions_var.set(0)
         #self.use_image_names_as_captions_checkbox.set(0)
         self.add_class_images_to_dataset_checkbox.configure(state='disabled')
         self.add_class_images_to_dataset_label.configure(state='disabled')
+        self.add_class_images_to_dataset_var.set(0)
         #self.add_class_images_to_dataset_checkbox.set(0)
         pass
     def fine_tune_mode(self):
@@ -1267,6 +1322,9 @@ class App(ctk.CTk):
                 self.use_image_names_as_captions_checkbox.configure(state='normal')
                 self.add_class_images_to_dataset_checkbox.configure(state='normal')
                 self.add_class_images_to_dataset_label.configure(state='normal')
+                self.use_text_files_as_captions_var.set(1)
+                self.use_image_names_as_captions_var.set(1)
+                self.add_class_images_to_dataset_var.set(0)
         except:
             pass
         try:
@@ -1281,6 +1339,8 @@ class App(ctk.CTk):
         #self.with_prior_loss_preservation_checkbox.set(0)
         self.prior_loss_preservation_weight_label.configure(state='disabled')
         self.prior_loss_preservation_weight_entry.configure(state='disabled')
+        self.with_prior_loss_preservation_var.set(0)
+
         #self.prior_loss_preservation_weight_entry.set(1.0)
         pass
     def lora_mode(self):
@@ -1332,6 +1392,9 @@ class App(ctk.CTk):
         #make a button to open a file dialog
         self.input_model_path_button = ctk.CTkButton(self.general_frame_subframe,width=30, text="...", command=self.choose_model)
         self.input_model_path_button.grid(row=1, column=2, sticky="w")
+        #create another button to resume from latest checkpoint
+        self.input_model_path_resume_button = ctk.CTkButton(self.general_frame_subframe, text="Resume", command=lambda : self.find_latest_generated_model(self.input_model_path_entry.get()))
+        self.input_model_path_resume_button.place(relx=0.5, rely=0.5, anchor="center")
         self.vae_model_path_label = ctk.CTkLabel(self.general_frame_subframe, text="VAE model path / HuggingFace Repo")
         vae_model_path_label_ttp = CreateToolTip(self.vae_model_path_label, "OPTINAL The path to the VAE model to use. Can be a local path or a HuggingFace repo path.")
         self.vae_model_path_label.grid(row=2, column=0, sticky="nsew")
@@ -1393,13 +1456,13 @@ class App(ctk.CTk):
         #self.seed_label.grid(row=1, column=0, sticky="nsew")
         self.seed_entry = ctk.CTkEntry(self.training_frame_subframe)
         #self.seed_entry.grid(row=1, column=1, sticky="nsew")
-        #self.seed_entry.insert(0, self.seed_number)
+        self.seed_entry.insert(0, self.seed_number)
         #create resolution dark mode dropdown
         self.resolution_label = ctk.CTkLabel(self.training_frame_subframe, text="Resolution")
         resolution_label_ttp = CreateToolTip(self.resolution_label, "The resolution of the images to train on.")
         #self.resolution_label.grid(row=2, column=0, sticky="nsew")
         self.resolution_var = tk.StringVar()
-        #self.resolution_var.set(self.resolution)
+        self.resolution_var.set(self.resolution)
         self.resolution_dropdown = ctk.CTkOptionMenu(self.training_frame_subframe, variable=self.resolution_var, values=["256", "320", "384", "448","512", "576", "640", "704", "768", "832", "896", "960", "1024"])
         #self.resolution_dropdown.grid(row=2, column=1, sticky="nsew")
         
@@ -1408,7 +1471,7 @@ class App(ctk.CTk):
         train_batch_size_label_ttp = CreateToolTip(self.train_batch_size_label, "The batch size to use for training.")
         #self.train_batch_size_label.grid(row=3, column=0, sticky="nsew")
         self.train_batch_size_var = tk.StringVar()
-        #self.train_batch_size_var.set(self.batch_size)
+        self.train_batch_size_var.set(self.batch_size)
         #make a list of values from 1 to 60 that are strings
         #train_batch_size_values = 
         self.train_batch_size_dropdown = ctk.CTkOptionMenu(self.training_frame_subframe, variable=self.train_batch_size_var, values=[str(i) for i in range(1,61)])
@@ -1420,20 +1483,20 @@ class App(ctk.CTk):
         #self.train_epochs_label.grid(row=4, column=0, sticky="nsew")
         self.train_epochs_entry = ctk.CTkEntry(self.training_frame_subframe)
         #self.train_epochs_entry.grid(row=4, column=1, sticky="nsew")
-        #self.train_epochs_entry.insert(0, self.num_train_epochs)
+        self.train_epochs_entry.insert(0, self.num_train_epochs)
         
         #create mixed precision dark mode dropdown
         self.mixed_precision_label = ctk.CTkLabel(self.training_frame_subframe, text="Mixed Precision")
         mixed_precision_label_ttp = CreateToolTip(self.mixed_precision_label, "Use mixed precision training to speed up training, FP16 is recommended but requires a GPU with Tensor Cores.")
         #self.mixed_precision_label.grid(row=5, column=0, sticky="nsew")
         self.mixed_precision_var = tk.StringVar()
-        #self.mixed_precision_var.set(self.mixed_precision)
+        self.mixed_precision_var.set(self.mixed_precision)
         self.mixed_precision_dropdown = ctk.CTkOptionMenu(self.training_frame_subframe, variable=self.mixed_precision_var,values=["fp16", "fp32"])
         #self.mixed_precision_dropdown.grid(row=5, column=1, sticky="nsew")
 
         #create use 8bit adam checkbox
         self.use_8bit_adam_var = tk.IntVar()
-        #self.use_8bit_adam_var.set(self.use_8bit_adam)
+        self.use_8bit_adam_var.set(self.use_8bit_adam)
         #create label
         self.use_8bit_adam_label = ctk.CTkLabel(self.training_frame_subframe, text="Use 8bit Adam")
         use_8bit_adam_label_ttp = CreateToolTip(self.use_8bit_adam_label, "Use 8bit Adam to speed up training, requires bytsandbytes.")
@@ -1443,7 +1506,7 @@ class App(ctk.CTk):
         #self.use_8bit_adam_checkbox.grid(row=6, column=1, sticky="nsew")
         #create use gradient checkpointing checkbox
         self.use_gradient_checkpointing_var = tk.IntVar()
-        #self.use_gradient_checkpointing_var.set(self.use_gradient_checkpointing)
+        self.use_gradient_checkpointing_var.set(self.use_gradient_checkpointing)
         #create label
         self.use_gradient_checkpointing_label = ctk.CTkLabel(self.training_frame_subframe, text="Use Gradient Checkpointing")
         use_gradient_checkpointing_label_ttp = CreateToolTip(self.use_gradient_checkpointing_label, "Use gradient checkpointing to reduce RAM usage.")
@@ -1456,7 +1519,7 @@ class App(ctk.CTk):
         gradient_accumulation_steps_label_ttp = CreateToolTip(self.gradient_accumulation_steps_label, "The number of gradient accumulation steps to use, this is useful for training with limited GPU memory.")
         #self.gradient_accumulation_steps_label.grid(row=8, column=0, sticky="nsew")
         self.gradient_accumulation_steps_var = tk.StringVar()
-        #self.gradient_accumulation_steps_var.set(self.accumulation_steps)
+        self.gradient_accumulation_steps_var.set(self.accumulation_steps)
         self.gradient_accumulation_steps_dropdown = ctk.CTkOptionMenu(self.training_frame_subframe, variable=self.gradient_accumulation_steps_var, values=['0','1','2','3','4','5','6','7','8','9','10'])
         #self.gradient_accumulation_steps_dropdown.grid(row=8, column=1, sticky="nsew")
         #create learning rate dark mode entry
@@ -1465,13 +1528,13 @@ class App(ctk.CTk):
         #self.learning_rate_label.grid(row=9, column=0, sticky="nsew")
         self.learning_rate_entry = ctk.CTkEntry(self.training_frame_subframe)
         #self.learning_rate_entry.grid(row=9, column=1, sticky="nsew")
-        #self.learning_rate_entry.insert(0, self.learning_rate)
+        self.learning_rate_entry.insert(0, self.learning_rate)
         #create learning rate scheduler dropdown
         self.learning_rate_scheduler_label = ctk.CTkLabel(self.training_frame_subframe, text="Learning Rate Scheduler")
         learning_rate_scheduler_label_ttp = CreateToolTip(self.learning_rate_scheduler_label, "The learning rate scheduler to use for training.")
         #self.learning_rate_scheduler_label.grid(row=10, column=0, sticky="nsew")
         self.learning_rate_scheduler_var = tk.StringVar()
-        #self.learning_rate_scheduler_var.set(self.learning_rate_schedule)
+        self.learning_rate_scheduler_var.set(self.learning_rate_schedule)
         self.learning_rate_scheduler_dropdown = ctk.CTkOptionMenu(self.training_frame_subframe, variable=self.learning_rate_scheduler_var, values=["linear", "cosine", "cosine_with_restarts", "polynomial", "constant", "constant_with_warmup"])
         #self.learning_rate_scheduler_dropdown.grid(row=10, column=1, sticky="nsew")
         #create num warmup steps dark mode entry
@@ -1480,10 +1543,10 @@ class App(ctk.CTk):
         #self.num_warmup_steps_label.grid(row=11, column=0, sticky="nsew")
         self.num_warmup_steps_entry = ctk.CTkEntry(self.training_frame_subframe)
         #self.num_warmup_steps_entry.grid(row=11, column=1, sticky="nsew")
-        #self.num_warmup_steps_entry.insert(0, self.learning_rate_warmup_steps)
+        self.num_warmup_steps_entry.insert(0, self.learning_rate_warmup_steps)
         #create use latent cache checkbox
         self.use_latent_cache_var = tk.IntVar()
-        #self.use_latent_cache_var.set(self.do_not_use_latents_cache)
+        self.use_latent_cache_var.set(self.do_not_use_latents_cache)
         #create label
         self.use_latent_cache_label = ctk.CTkLabel(self.training_frame_subframe, text="Use Latent Cache")
         use_latent_cache_label_ttp = CreateToolTip(self.use_latent_cache_label, "Cache the latents to speed up training.")
@@ -1493,7 +1556,7 @@ class App(ctk.CTk):
         #self.use_latent_cache_checkbox.grid(row=12, column=1, sticky="nsew")
         #create save latent cache checkbox
         self.save_latent_cache_var = tk.IntVar()
-        #self.save_latent_cache_var.set(self.save_latents_cache)
+        self.save_latent_cache_var.set(self.save_latents_cache)
         #create label
         self.save_latent_cache_label = ctk.CTkLabel(self.training_frame_subframe, text="Save Latent Cache")
         save_latent_cache_label_ttp = CreateToolTip(self.save_latent_cache_label, "Save the latents cache to disk after generation, will be remade if batch size changes.")
@@ -1503,7 +1566,7 @@ class App(ctk.CTk):
         #self.save_latent_cache_checkbox.grid(row=13, column=1, sticky="nsew")
         #create regnerate latent cache checkbox
         self.regenerate_latent_cache_var = tk.IntVar()
-        #self.regenerate_latent_cache_var.set(self.regenerate_latents_cache)
+        self.regenerate_latent_cache_var.set(self.regenerate_latents_cache)
         #create label
         self.regenerate_latent_cache_label = ctk.CTkLabel(self.training_frame_subframe, text="Regenerate Latent Cache")
         regenerate_latent_cache_label_ttp = CreateToolTip(self.regenerate_latent_cache_label, "Force the latents cache to be regenerated.")
@@ -1513,7 +1576,7 @@ class App(ctk.CTk):
         #self.regenerate_latent_cache_checkbox.grid(row=14, column=1, sticky="nsew")
         #create train text encoder checkbox
         self.train_text_encoder_var = tk.IntVar()
-        #self.train_text_encoder_var.set(self.train_text_encoder)
+        self.train_text_encoder_var.set(self.train_text_encoder)
         #create label
         self.train_text_encoder_label = ctk.CTkLabel(self.training_frame_subframe, text="Train Text Encoder")
         train_text_encoder_label_ttp = CreateToolTip(self.train_text_encoder_label, "Train the text encoder along with the UNET.")
@@ -1523,7 +1586,7 @@ class App(ctk.CTk):
         #self.train_text_encoder_checkbox.grid(row=15, column=1, sticky="nsew")
         #create limit text encoder encoder entry
         self.limit_text_encoder_var = tk.StringVar()
-        #self.limit_text_encoder_var.set(self.limit_text_encoder)
+        self.limit_text_encoder_var.set(self.limit_text_encoder)
         #create label
         self.limit_text_encoder_label = ctk.CTkLabel(self.training_frame_subframe, text="Limit Text Encoder")
         limit_text_encoder_label_ttp = CreateToolTip(self.limit_text_encoder_label, "Stop training the text encoder after this many epochs, use % to train for a percentage of the total epochs.")
@@ -1534,7 +1597,7 @@ class App(ctk.CTk):
         
         #create checkbox disable cudnn benchmark
         self.disable_cudnn_benchmark_var = tk.IntVar()
-        #self.disable_cudnn_benchmark_var.set(self.disable_cudnn_benchmark)
+        self.disable_cudnn_benchmark_var.set(self.disable_cudnn_benchmark)
         #create label for checkbox
         self.disable_cudnn_benchmark_label = ctk.CTkLabel(self.training_frame_subframe, text="EXPERIMENTAL: Disable cuDNN Benchmark")
         disable_cudnn_benchmark_label_ttp = CreateToolTip(self.disable_cudnn_benchmark_label, "Disable cuDNN benchmarking, may offer 2x performance on some systems and stop OOM errors.")
@@ -1886,7 +1949,7 @@ class App(ctk.CTk):
         #add download dataset button
         self.download_dataset_button = ctk.CTkButton(self.toolbox_frame_subframe, text="Download Dataset", command=self.download_dataset)
         self.download_dataset_button.grid(row=9, column=2, sticky="nsew")
-    def playground_find_latest_generated_model(self):
+    def find_latest_generated_model(self,entry=None):
         last_output_path = self.output_path_entry.get()
         last_num_epochs = self.train_epochs_entry.get()
         last_model_path = last_output_path + os.sep + last_num_epochs
@@ -1900,8 +1963,9 @@ class App(ctk.CTk):
                 #check if the output path has a model in it
                 if os.path.exists(last_model_path):
                     #check if the model is a ckpt
-                    self.play_model_entry.delete(0, tk.END)
-                    self.play_model_entry.insert(0, last_model_path)
+                    if entry:
+                        entry.delete(0, tk.END)
+                        entry.insert(0, last_model_path)
                 else:
                     #find the newest directory in the output path
                     
@@ -1909,9 +1973,10 @@ class App(ctk.CTk):
                     #convert newest_dir seperators to the correct ones for the os
                     newest_dir = newest_dir.replace("/", os.sep)
                     newest_dir = newest_dir.replace("\\", os.sep)
-                    last_model_path = newest_dir
-                    self.play_model_entry.delete(0, tk.END)
-                    self.play_model_entry.insert(0, last_model_path)
+                    self.last_model_path = newest_dir
+                    if entry:
+                        entry.delete(0, tk.END)
+                        entry.insert(0, last_model_path)
             else:
                 return
         else:
@@ -1984,6 +2049,7 @@ class App(ctk.CTk):
         
         import diffusers
         import torch
+        from diffusers.utils.import_utils import is_xformers_available
         self.play_height = sample_height
         self.play_width = sample_width
         #interactive = self.play_interactive_generation_button_bool.get()
@@ -1996,7 +2062,7 @@ class App(ctk.CTk):
             self.play_generate_image_button["text"] = "Loading Model, Please stand by..."
             #self.play_generate_image_button.configure(fg="red")
             self.play_generate_image_button.update()
-            self.pipe = diffusers.DiffusionPipeline.from_pretrained(model,torch_dtype=torch.float16)
+            self.pipe = diffusers.DiffusionPipeline.from_pretrained(model,torch_dtype=torch.float16,safety_checker=None)
             self.pipe.to('cuda')
             self.current_model = model
             if scheduler == 'DPMSolverMultistepScheduler':
@@ -2010,7 +2076,14 @@ class App(ctk.CTk):
             if scheduler == 'EulerDiscreteScheduler':
                 scheduler = diffusers.EulerDiscreteScheduler.from_config(self.pipe.scheduler.config)
             self.pipe.scheduler = scheduler
-        
+            if is_xformers_available():
+                    try:
+                        self.pipe.enable_xformers_memory_efficient_attention()
+                    except Exception as e:
+                        print(
+                            "Could not enable memory efficient attention. Make sure xformers is installed"
+                            f" correctly and a GPU is available: {e}"
+                        )
         def displayInterImg(step: int, timestep: int, latents: torch.FloatTensor):
             #tensor to image
             img = self.pipe.decode_latents(latents)
@@ -2820,7 +2893,8 @@ class App(ctk.CTk):
         self.dataset_repeats_entry.delete(0, tk.END)
         self.dataset_repeats_entry.insert(0, configure["dataset_repeats"])
         self.limit_text_encoder_entry.delete(0, tk.END)
-        self.limit_text_encoder_entry.insert(0, configure["limit_text_encoder_training"])
+        if configure["limit_text_encoder_training"] != '0':
+            self.limit_text_encoder_entry.insert(0, configure["limit_text_encoder_training"])
         self.use_text_files_as_captions_var.set(configure["use_text_files_as_captions"])
         self.convert_to_ckpt_after_training_var.set(configure["convert_to_ckpt_after_training"])
         if configure["execute_post_conversion"]:
@@ -2836,7 +2910,7 @@ class App(ctk.CTk):
         self.update()
         #self.canvas.configure(scrollregion=self.canvas.bbox("all"))
     
-    def process_inputs(self):
+    def process_inputs(self,export=None):
         #collect and process all the inputs
         self.update_controlled_seed_sample()
         self.update_sample_prompts()
@@ -2893,127 +2967,249 @@ class App(ctk.CTk):
             return
         #open stabletune_concept_list.json
         if os.path.exists('stabletune_last_run.json'):
-            with open('stabletune_last_run.json') as f:
-                self.last_run = json.load(f)
-            if self.regenerate_latent_cache == False:
-                if self.last_run["concepts"] == self.concepts:
-                    #check if resolution is the same
-                    try:
-                        #try because I keep adding stuff to the json file and it may error out for peeps
-                        if self.last_run["resolution"] != self.resolution or self.use_text_files_as_captions != self.last_run['use_text_files_as_captions'] or self.last_run['dataset_repeats'] != self.dataset_repeats or self.last_run["batch_size"] != self.batch_size or self.last_run["train_text_encoder"] != self.train_text_encoder or self.last_run["use_image_names_as_captions"] != self.use_image_names_as_captions or self.last_run["auto_balance_concept_datasets"] != self.auto_balance_concept_datasets or self.last_run["add_class_images_to_dataset"] != self.add_class_images_to_dataset or self.last_run["number_of_class_images"] != self.number_of_class_images or self.last_run["aspect_ratio_bucketing"] != self.use_aspect_ratio_bucketing:
-                            self.regenerate_latent_cache = True
-                            #show message
-                            
-                            messagebox.showinfo("StableTuner", "Configuration changed, regenerating latent cache")
-                    except:
-                        print("Error trying to see if regenerating latent cache is needed, this means it probably needs to be regenerated and ST was updated recently.")
-                        pass
-                
+            try:
+                with open('stabletune_last_run.json') as f:
+                    self.last_run = json.load(f)
+                if self.regenerate_latent_cache == False:
+                    if self.last_run["concepts"] == self.concepts:
+                        #check if resolution is the same
+                        try:
+                            #try because I keep adding stuff to the json file and it may error out for peeps
+                            if self.last_run["resolution"] != self.resolution or self.use_text_files_as_captions != self.last_run['use_text_files_as_captions'] or self.last_run['dataset_repeats'] != self.dataset_repeats or self.last_run["batch_size"] != self.batch_size or self.last_run["train_text_encoder"] != self.train_text_encoder or self.last_run["use_image_names_as_captions"] != self.use_image_names_as_captions or self.last_run["auto_balance_concept_datasets"] != self.auto_balance_concept_datasets or self.last_run["add_class_images_to_dataset"] != self.add_class_images_to_dataset or self.last_run["number_of_class_images"] != self.number_of_class_images or self.last_run["aspect_ratio_bucketing"] != self.use_aspect_ratio_bucketing:
+                                self.regenerate_latent_cache = True
+                                #show message
+                                
+                                messagebox.showinfo("StableTuner", "Configuration changed, regenerating latent cache")
+                        except:
+                            print("Error trying to see if regenerating latent cache is needed, this means it probably needs to be regenerated and ST was updated recently.")
+                            pass
+            except Exception as e:
+                print(e)
+                print("Error checking last run, regenerating latent cache")
+                self.regenerate_latent_cache = True
 
         #create a bat file to run the training
         if self.mixed_precision == 'fp16' or self.mixed_precision == 'bf16':
+
             batBase = f'accelerate "launch" "--mixed_precision={self.mixed_precision}" "scripts/trainer.py"'
+            if export == 'Linux':
+                batBase = f'accelerate launch --mixed_precision="{self.mixed_precision}" scripts/trainer.py'
         else:
             batBase = 'accelerate "launch" "--mixed_precision=no" "scripts/trainer.py"'
+            if export == 'Linux':
+                batBase = f'accelerate launch --mixed_precision="no" scripts/trainer.py'
         if self.disable_cudnn_benchmark == True:
-            batBase += ' "--disable_cudnn_benchmark" '
+            if export == 'Linux':
+                batBase += ' --disable_cudnn_benchmark'
+            else:
+                batBase += ' "--disable_cudnn_benchmark" '
         if self.use_text_files_as_captions == True:
-            batBase += ' "--use_text_files_as_captions" '
+            if export == 'Linux':
+                batBase += ' --use_text_files_as_captions'
+            else:
+                batBase += ' "--use_text_files_as_captions" '
         if self.sample_step_interval != '0' or self.sample_step_interval != '' or self.sample_step_interval != ' ':
-            batBase += f' "--sample_step_interval={self.sample_step_interval}" '
-        if '%' in self.limit_text_encoder or self.limit_text_encoder != '0' and len(self.limit_text_encoder) > 0:
-            #calculate the epoch number from the percentage and set the limit_text_encoder to the epoch number
-            self.limit_text_encoder = int(self.limit_text_encoder.replace('%','')) * int(self.train_epocs) / 100
-            #round the number to the nearest whole number
-            self.limit_text_encoder = round(self.limit_text_encoder)
-            batBase += f' "--stop_text_encoder_training={self.limit_text_encoder}" '
-        batBase += f' "--pretrained_model_name_or_path={self.model_path}" '
-        batBase += f' "--pretrained_vae_name_or_path={self.vae_path}" '
-        batBase += f' "--output_dir={self.output_path}" '
-        batBase += f' "--seed={self.seed_number}" '
-        batBase += f' "--resolution={self.resolution}" '
-        batBase += f' "--train_batch_size={self.batch_size}" '
-        batBase += f' "--num_train_epochs={self.train_epocs}" '
+            if export == 'Linux':
+                batBase += f' --sample_step_interval={self.sample_step_interval}'
+            else:
+                batBase += f' "--sample_step_interval={self.sample_step_interval}" '
+            try:
+                #if limit_text_encoder is a percentage calculate what epoch to stop at
+                if '%' in self.limit_text_encoder:
+                    percent = float(self.limit_text_encoder.replace('%',''))
+                    stop_epoch = int((int(self.train_epocs) * percent) / 100)
+                    if export == 'Linux':
+                        batBase += f' --stop_text_encoder_training={stop_epoch}'
+                    else:
+                        batBase += f' "--stop_text_encoder_training={stop_epoch}" '
+                elif '%' not in self.limit_text_encoder and self.limit_text_encoder != '' and self.limit_text_encoder != ' ' and self.limit_text_encoder != '0':
+                    if export == 'Linux':
+                        batBase += f' --stop_text_encoder_training={self.limit_text_encoder}'
+                    else:
+                        batBase += f' "--stop_text_encoder_training={self.limit_text_encoder}" '
+            except:
+                pass
+        if export=='Linux':
+            batBase += f' --pretrained_model_name_or_path="{self.model_path}" '
+            batBase += f' --pretrained_vae_name_or_path="{self.vae_path}" '
+            batBase += f' --output_dir="{self.output_path}" '
+            batBase += f' --seed={self.seed_number} '
+            batBase += f' --resolution={self.resolution} '
+            batBase += f' --train_batch_size={self.batch_size} '
+            batBase += f' --num_train_epochs={self.train_epocs} '
+        else:
+            batBase += f' "--pretrained_model_name_or_path={self.model_path}" '
+            batBase += f' "--pretrained_vae_name_or_path={self.vae_path}" '
+            batBase += f' "--output_dir={self.output_path}" '
+            batBase += f' "--seed={self.seed_number}" '
+            batBase += f' "--resolution={self.resolution}" '
+            batBase += f' "--train_batch_size={self.batch_size}" '
+            batBase += f' "--num_train_epochs={self.train_epocs}" '
+
         if self.mixed_precision == 'fp16' or self.mixed_precision == 'bf16':
-            batBase += f' "--mixed_precision={self.mixed_precision}" '
+            if export == 'Linux':
+                batBase += f' --mixed_precision="{self.mixed_precision}"'
+            else:
+                batBase += f' "--mixed_precision={self.mixed_precision}" '
         if self.use_aspect_ratio_bucketing:
-            batBase += f' "--use_bucketing" '
+            if export == 'Linux':
+                batBase += ' --use_bucketing'
+            else:
+                batBase += f' "--use_bucketing" '
         if self.use_8bit_adam == True:
-            batBase += f' "--use_8bit_adam" '
+            if export == 'Linux':
+                batBase += ' --use_8bit_adam'
+            else:
+                batBase += f' "--use_8bit_adam" '
         if self.use_gradient_checkpointing == True:
-            batBase += f' "--gradient_checkpointing" '
-        batBase += f' "--gradient_accumulation_steps={self.accumulation_steps}" '
-        batBase += f' "--learning_rate={self.learning_rate}" '
-        batBase += f' "--lr_warmup_steps={self.warmup_steps}" '
-        batBase += f' "--lr_scheduler={self.learning_rate_scheduler}" '
+            if export == 'Linux':
+                batBase += ' --gradient_checkpointing'
+            else:
+                batBase += f' "--gradient_checkpointing" '
+        
+        if export == 'Linux':
+            batBase += f' --gradient_accumulation_steps={self.accumulation_steps}'
+            batBase += f' --learning_rate={self.learning_rate}'
+            batBase += f' --lr_warmup_steps={self.warmup_steps}'
+            batBase += f' --lr_scheduler="{self.learning_rate_scheduler}"'
+        else:   
+            batBase += f' "--gradient_accumulation_steps={self.accumulation_steps}" '
+            batBase += f' "--learning_rate={self.learning_rate}" '
+            batBase += f' "--lr_warmup_steps={self.warmup_steps}" '
+            batBase += f' "--lr_scheduler={self.learning_rate_scheduler}" '
         if self.use_latent_cache == False:
-            batBase += f' "--not_cache_latents" '
+            if export == 'Linux':
+                batBase += ' --not_cache_latents'
+            else:
+                batBase += f' "--not_cache_latents" '
         if self.save_latent_cache == True:
-            batBase += f' "--save_latents_cache" '
+            if export == 'Linux':
+                batBase += ' --save_latents_cache'
+            else:
+                batBase += f' "--save_latents_cache" '
         if self.regenerate_latent_cache == True:
-            batBase += f' "--regenerate_latent_cache" '
+            if export == 'Linux':
+                batBase += ' --regenerate_latent_cache'
+            else:
+                batBase += f' "--regenerate_latent_cache" '
         if self.train_text_encoder == True:
-            batBase += f' "--train_text_encoder" '
+            if export == 'Linux':
+                batBase += ' --train_text_encoder'
+            else:
+                batBase += f' "--train_text_encoder" '
         if self.with_prior_loss_preservation == True and self.use_aspect_ratio_bucketing == False:
-            batBase += f' "--with_prior_preservation" '
-            batBase += f' "--prior_loss_weight={self.prior_loss_preservation_weight}" '
+            if export == 'Linux':
+                batBase += ' --with_prior_preservation'
+                batBase += f' --prior_loss_weight={self.prior_loss_preservation_weight}'
+            else:
+                batBase += f' "--with_prior_preservation" '
+                batBase += f' "--prior_loss_weight={self.prior_loss_preservation_weight}" '
         elif self.with_prior_loss_preservation == True and self.use_aspect_ratio_bucketing == True:
             print('loss preservation isnt supported with aspect ratio bucketing yet, sorry!')
         if self.use_image_names_as_captions == True:
-            batBase += f' "--use_image_names_as_captions" '
+            if export == 'Linux':
+                batBase += ' --use_image_names_as_captions'
+            else:
+                batBase += f' "--use_image_names_as_captions" '
         if self.auto_balance_concept_datasets == True:
-            batBase += f' "--auto_balance_concept_datasets" '
+            if export == 'Linux':
+                batBase += ' --auto_balance_concept_datasets'
+            else:
+                batBase += f' "--auto_balance_concept_datasets" '
         if self.add_class_images_to_dataset == True and self.with_prior_loss_preservation == False:
-            batBase += f' "--add_class_images_to_dataset" '
-        batBase += f' "--concepts_list={self.concept_list_json_path}" '
-        batBase += f' "--num_class_images={self.number_of_class_images}" '
-        batBase += f' "--save_every_n_epoch={self.save_every_n_epochs}" '
-        batBase += f' "--n_save_sample={self.number_of_samples_to_generate}" '
-        batBase += f' "--sample_height={self.sample_height}" '
-        batBase += f' "--sample_width={self.sample_width}" '
-        batBase += f' "--dataset_repeats={self.dataset_repeats}" '
+            if export == 'Linux':
+                batBase += ' --add_class_images_to_dataset'
+            else:
+                batBase += f' "--add_class_images_to_dataset" '
+        if export == 'Linux':
+            batBase += f' --concepts_list="{self.concept_list_json_path}"'
+            batBase += f' --num_class_images={self.number_of_class_images}'
+            batBase += f' --save_every_n_epoch={self.save_every_n_epochs}'
+            batBase += f' --n_save_sample={self.number_of_samples_to_generate}'
+            batBase += f' --sample_height={self.sample_height}'
+            batBase += f' --sample_width={self.sample_width}'
+            batBase += f' --dataset_repeats={self.dataset_repeats}'
+        else:
+            batBase += f' "--concepts_list={self.concept_list_json_path}" '
+            batBase += f' "--num_class_images={self.number_of_class_images}" '
+            batBase += f' "--save_every_n_epoch={self.save_every_n_epochs}" '
+            batBase += f' "--n_save_sample={self.number_of_samples_to_generate}" '
+            batBase += f' "--sample_height={self.sample_height}" '
+            batBase += f' "--sample_width={self.sample_width}" '
+            batBase += f' "--dataset_repeats={self.dataset_repeats}" '
         if self.sample_random_aspect_ratio == True:
-            batBase += f' "--sample_aspect_ratios" '
+            if export == 'Linux':
+                batBase += ' --sample_aspect_ratios'
+            else:
+                batBase += f' "--sample_aspect_ratios" '
         if self.send_telegram_updates == True:
-            batBase += f' "--send_telegram_updates" '
-            batBase += f' "--telegram_token={self.telegram_token}" '
-            batBase += f' "--telegram_chat_id={self.telegram_chat_id}" '
+            if export == 'Linux':
+                batBase += ' --send_telegram_updates'
+                batBase += f' --telegram_token="{self.telegram_token}"'
+                batBase += f' --telegram_chat_id="{self.telegram_chat_id}"'
+            else:
+                batBase += f' "--send_telegram_updates" '
+                batBase += f' "--telegram_token={self.telegram_token}" '
+                batBase += f' "--telegram_chat_id={self.telegram_chat_id}" '
         #remove duplicates from self.sample_prompts
         
         self.sample_prompts = list(dict.fromkeys(self.sample_prompts))
         #remove duplicates from self.add_controlled_seed_to_sample
         self.add_controlled_seed_to_sample = list(dict.fromkeys(self.add_controlled_seed_to_sample))
         for i in range(len(self.sample_prompts)):
-            batBase += f' "--add_sample_prompt={self.sample_prompts[i]}" '
+            if export == 'Linux':
+                batBase += f' --add_sample_prompt="{self.sample_prompts[i]}"'
+            else:
+                batBase += f' "--add_sample_prompt={self.sample_prompts[i]}" '
         for i in range(len(self.add_controlled_seed_to_sample)):
-            batBase += f' "--save_sample_controlled_seed={self.add_controlled_seed_to_sample[i]}" '
+            if export == 'Linux':
+                batBase += f' --save_sample_controlled_seed={self.add_controlled_seed_to_sample[i]}'
+            else:
+                batBase += f' "--save_sample_controlled_seed={self.add_controlled_seed_to_sample[i]}" '
         if self.sample_on_training_start == True:
-            batBase += f' "--sample_on_training_start" '
+            if export == 'Linux':
+                batBase += ' --sample_on_training_start'
+            else:
+                batBase += f' "--sample_on_training_start" '
         #save configure
         self.save_config('stabletune_last_run.json')
         
-        #save the bat file
-        with open("scripts/train.bat", "w", encoding="utf-8") as f:
-            f.write(batBase)
-        #close the window
-        self.destroy()
-        #self.master.destroy()
-        #run the bat file
-        self.quit()
-        train = os.system(r".\scripts\train.bat")
-        #if exit code is 0, then the training was successful
-        if train == 0:
-            app = App()
-            app.mainloop()
-        else:
-            #cancel conversion on restart
-            with open('stabletune_last_run.json', 'r') as f:
-                data = json.load(f)
-            data['execute_post_conversion'] = False
-            with open('stabletune_last_run.json', 'w') as f:
-                json.dump(data, f)
-            os.system("pause")
-        #restart the app
+        if export == False:
+            #save the bat file
+            with open("scripts/train.bat", "w", encoding="utf-8") as f:
+                f.write(batBase)
+            #close the window
+            self.destroy()
+            #self.master.destroy()
+            #run the bat file
+            self.quit()
+            train = os.system(r".\scripts\train.bat")
+            #if exit code is 0, then the training was successful
+            if train == 0:
+                app = App()
+                app.mainloop()
+            else:
+                #cancel conversion on restart
+                with open('stabletune_last_run.json', 'r') as f:
+                    data = json.load(f)
+                data['execute_post_conversion'] = False
+                with open('stabletune_last_run.json', 'w') as f:
+                    json.dump(data, f)
+                os.system("pause")
+            #restart the app
+        elif export == 'win':
+            with open("train.bat", "w", encoding="utf-8") as f:
+                f.write(batBase)
+            #show message
+            messagebox.showinfo("Export", "Exported to train.bat")
+        elif export == 'Linux':
+            #write batBase to a shell script
+            with open("train.sh", "w", encoding="utf-8") as f:
+                f.write(batBase)
+            #show message
+            messagebox.showinfo("Export", "Exported to train.sh.\nDon't forget to take stabletune_concept_list.json with you!")
+            #close the window
+
         
 
 
