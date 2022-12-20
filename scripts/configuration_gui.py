@@ -699,7 +699,7 @@ class App(ctk.CTk):
         #self.general_frame_subframe_side_guide.grid_columnconfigure(0, weight=1)
         self.create_general_settings_widgets()   
         self.apply_general_style_to_widgets(self.general_frame_subframe)
-
+        self.override_general_style_widgets()
         self.training_frame = ctk.CTkFrame(self, width=400, corner_radius=0,fg_color='transparent')
         self.training_frame.grid_columnconfigure(0, weight=1)
         #self.training_frame.grid_columnconfigure(0, weight=1)
@@ -991,6 +991,8 @@ class App(ctk.CTk):
         #self.canvas.configure(scrollregion=self.canvas.bbox("all"))
         #print(self.concept_widgets[0].concept.concept_path)
     def create_default_variables(self):
+        self.conditional_dropout = ''
+        self.cloud_toggle = True
         self.generation_window = None
         self.concept_widgets = []
         self.sample_prompts = []
@@ -1155,7 +1157,23 @@ class App(ctk.CTk):
         finally:
             #make sure to release the grab (Tk 8.0a1 only)
             self.menu.grab_release()
+    def create_left_click_menu_config(self, event):
+        #create a menu
+        self.menu = Menu(self.master, tearoff=0)
+        #set menu size and font size
+        self.menu.config(font=("Segoe UI", 15))
 
+        #set dark colors for the menu
+        self.menu.configure(bg="#2d2d2d", fg="#ffffff", activebackground="#2d2d2d", activeforeground="#ffffff")
+        #add commands to the menu
+        self.menu.add_command(label="Load Config", command=self.load_config)
+        self.menu.add_command(label="Save Config", command=self.save_config)
+        #display the menu
+        try:
+            self.menu.tk_popup(event.x_root, event.y_root)
+        finally:
+            #make sure to release the grab (Tk 8.0a1 only)
+            self.menu.grab_release()
     def on_tab_changed(self, event):
         #get the current selected notebook tab id
         tab_id = self.notebook.select()
@@ -1226,7 +1244,10 @@ class App(ctk.CTk):
         self.play_generate_image_button.grid(row=10, column=0, columnspan=2, sticky="nsew")
         self.play_convert_to_ckpt_button.grid(row=9, column=1, columnspan=1, sticky="w")
         #self.play_interactive_generation_button.grid(row=9, column=1, columnspan=1, sticky="w")
-
+    def override_general_style_widgets(self):
+        #self.input_model_path_button.grid(row=1, column=2, sticky="w")
+        #self.input_model_path_resume_button.grid(row=1, column=2, sticky="e")
+        pass
     def apply_general_style_to_widgets(self,frame):
         for i in frame.children.values():
             #print(i)
@@ -1374,14 +1395,18 @@ class App(ctk.CTk):
         self.quick_select_var.set('Quick Select Base Model')
         self.quick_select_dropdown = ctk.CTkOptionMenu(self.general_frame_subframe, variable=self.quick_select_var, values=self.quick_select_models, command=self.quick_select_model,dynamic_resizing=False, width=200)
         self.quick_select_dropdown.grid(row=0, column=0, sticky="nsew")
-        self.load_config_button = ctk.CTkButton(self.general_frame_subframe, text="Load Config", command=self.load_config)
+        self.load_config_button = ctk.CTkButton(self.general_frame_subframe, text="Load/Save Config")
+        #bind the load config button to a function
+        self.load_config_button.bind("<Button-1>", lambda event: self.create_left_click_menu_config(event))
         self.load_config_button.grid(row=0, column=1, sticky="nsew")
         #self.load_config_button.grid(row=2, column=1, sticky="nsew")
         #get the location of load config button in the frame
-        self.save_config_button = ctk.CTkButton(self.general_frame_subframe, text="Save Config", command=self.save_config)
-        self.save_config_button.grid(row=0, column=2, sticky="nsew")
+        #self.save_config_button = ctk.CTkButton(self.general_frame_subframe, text="Save Config", command=self.save_config)
+        #self.save_config_button.grid(row=0, column=2, sticky="nsew")
         #self.save_config_button.grid(row=2, column=2, sticky="nsew")
-
+        #create another button to resume from latest checkpoint
+        self.input_model_path_resume_button = ctk.CTkButton(self.general_frame_subframe, text="Resume From Last Session",width=50, command=lambda : self.find_latest_generated_model(self.input_model_path_entry))
+        self.input_model_path_resume_button.grid(row=0, column=2, sticky="nsew")
         self.input_model_path_label = ctk.CTkLabel(self.general_frame_subframe, text="Input Model / HuggingFace Repo")
         input_model_path_label_ttp = CreateToolTip(self.input_model_path_label, "The path to the diffusers model to use. Can be a local path or a HuggingFace repo path.")
         self.input_model_path_label.grid(row=1, column=0, sticky="nsew")
@@ -1392,9 +1417,7 @@ class App(ctk.CTk):
         #make a button to open a file dialog
         self.input_model_path_button = ctk.CTkButton(self.general_frame_subframe,width=30, text="...", command=self.choose_model)
         self.input_model_path_button.grid(row=1, column=2, sticky="w")
-        #create another button to resume from latest checkpoint
-        self.input_model_path_resume_button = ctk.CTkButton(self.general_frame_subframe, text="Resume", command=lambda : self.find_latest_generated_model(self.input_model_path_entry.get()))
-        self.input_model_path_resume_button.place(relx=0.5, rely=0.5, anchor="center")
+        
         self.vae_model_path_label = ctk.CTkLabel(self.general_frame_subframe, text="VAE model path / HuggingFace Repo")
         vae_model_path_label_ttp = CreateToolTip(self.vae_model_path_label, "OPTINAL The path to the VAE model to use. Can be a local path or a HuggingFace repo path.")
         self.vae_model_path_label.grid(row=2, column=0, sticky="nsew")
@@ -1445,7 +1468,24 @@ class App(ctk.CTk):
         self.telegram_chat_id_entry.grid(row=8, column=1,columnspan=3, sticky="nsew")
         self.telegram_chat_id_entry.insert(0, self.telegram_chat_id)
         
-
+        #add a switch to toggle runpod mode
+        #self.runpod_mode_label = ctk.CTkLabel(self.general_frame_subframe, text="Package for cloud training")
+        #runpod_mode_label_ttp = CreateToolTip(self.runpod_mode_label, "cloud mode will package up a quick trainer session for RunPod.")
+        #self.runpod_mode_label.grid(row=9, column=0, sticky="nsew")
+        #self.runpod_mode_var = tk.IntVar()
+        #self.runpod_mode_checkbox = ctk.CTkSwitch(self.general_frame_subframe,variable=self.runpod_mode_var, command=self.toggle_runpod_mode)
+        #self.runpod_mode_checkbox.grid(row=9, column=1, sticky="nsew")
+    
+    def toggle_runpod_mode(self):
+        toggle = self.runpod_mode_var.get()
+        #flip self.toggle
+        if toggle == True:
+            toggle = False
+            self.sidebar_button_12.configure(text='Export for Cloud!')
+        else:
+            toggle = True
+            self.sidebar_button_12.configure(text='Start Training!')
+        
     
     def create_trainer_settings_widgets(self):
         self.training_frame_title = ctk.CTkLabel(self.training_frame, text="Training Settings", font=ctk.CTkFont(size=20, weight="bold"))
@@ -1605,26 +1645,31 @@ class App(ctk.CTk):
         #create checkbox
         self.disable_cudnn_benchmark_checkbox = ctk.CTkSwitch(self.training_frame_subframe, variable=self.disable_cudnn_benchmark_var)
         #self.disable_cudnn_benchmark_checkbox.grid(row=17, column=1, sticky="nsew")
-        #list of label and entries that attach to the training tab
-  
-        #create label
+        #add conditional dropout entry
+        self.conditional_dropout_label = ctk.CTkLabel(self.training_frame_subframe, text="Conditional Dropout")
+        conditional_dropout_label_ttp = CreateToolTip(self.conditional_dropout_label, "Precentage of probability to drop out a caption token to train the model to be more robust to missing words.")
+        self.conditional_dropout_label.grid(row=18, column=0, sticky="nsew")
+        self.conditional_dropout_entry = ctk.CTkEntry(self.training_frame_subframe)
+        self.conditional_dropout_entry.grid(row=18, column=1, sticky="nsew")
+        self.conditional_dropout_entry.insert(0, self.conditional_dropout)
         #create with prior loss preservation checkbox
         self.with_prior_loss_preservation_var = tk.IntVar()
         self.with_prior_loss_preservation_var.set(self.with_prior_reservation)
         #create label
         self.with_prior_loss_preservation_label = ctk.CTkLabel(self.training_frame_subframe, text="With Prior Loss Preservation")
         with_prior_loss_preservation_label_ttp = CreateToolTip(self.with_prior_loss_preservation_label, "Use the prior loss preservation method. part of Dreambooth.")
-        self.with_prior_loss_preservation_label.grid(row=18, column=0, sticky="nsew")
+        self.with_prior_loss_preservation_label.grid(row=19, column=0, sticky="nsew")
         #create checkbox
         self.with_prior_loss_preservation_checkbox = ctk.CTkSwitch(self.training_frame_subframe, variable=self.with_prior_loss_preservation_var)
-        self.with_prior_loss_preservation_checkbox.grid(row=18, column=1, sticky="nsew")
+        self.with_prior_loss_preservation_checkbox.grid(row=19, column=1, sticky="nsew")
         #create prior loss preservation weight entry
         self.prior_loss_preservation_weight_label = ctk.CTkLabel(self.training_frame_subframe, text="Weight")
         prior_loss_preservation_weight_label_ttp = CreateToolTip(self.prior_loss_preservation_weight_label, "The weight of the prior loss preservation loss.")
-        self.prior_loss_preservation_weight_label.grid(row=18, column=1, sticky="e")
+        self.prior_loss_preservation_weight_label.grid(row=19, column=1, sticky="e")
         self.prior_loss_preservation_weight_entry = ctk.CTkEntry(self.training_frame_subframe)
-        self.prior_loss_preservation_weight_entry.grid(row=18, column=3, sticky="w")
+        self.prior_loss_preservation_weight_entry.grid(row=19, column=3, sticky="w")
         self.prior_loss_preservation_weight_entry.insert(0, self.prior_loss_weight)
+        
 
     def create_dataset_settings_widgets(self):
         #self.dataset_settings_label = ctk.CTkLabel(self.dataset_tab, text="Dataset Settings", font=("Arial", 12, "bold"))
@@ -1963,25 +2008,136 @@ class App(ctk.CTk):
                 #check if the output path has a model in it
                 if os.path.exists(last_model_path):
                     #check if the model is a ckpt
-                    if entry:
-                        entry.delete(0, tk.END)
-                        entry.insert(0, last_model_path)
+                    required_folders = ["vae", "unet", "tokenizer", "text_encoder"]
+                    if all(x in os.listdir(last_model_path) for x in required_folders):
+                       # print(newest_dir)
+                        last_model_path = newest_dir.replace("/", os.sep).replace("\\", os.sep)
+                        if entry:
+                            entry.delete(0, tk.END)
+                            entry.insert(0, last_model_path)
+                            return
+                    else:
+                        required_folders = ["vae", "unet", "tokenizer", "text_encoder"]
+                        newest_dirs = sorted(glob.iglob(last_output_path + os.sep + '*'), key=os.path.getctime, reverse=True)
+                        #sort newest_dirs by date
+                        for newest_dir in newest_dirs:
+                            #check if the newest dir has all the required folders
+                            if all(x in os.listdir(newest_dir) for x in required_folders):
+                                last_model_path = newest_dir.replace("/", os.sep).replace("\\", os.sep)
+                                if entry:
+                                    entry.delete(0, tk.END)
+                                    entry.insert(0, last_model_path)
+                                    return
                 else:
-                    #find the newest directory in the output path
-                    
-                    newest_dir = max(glob.iglob(last_output_path + os.sep + '*'), key=os.path.getctime)
-                    #convert newest_dir seperators to the correct ones for the os
-                    newest_dir = newest_dir.replace("/", os.sep)
-                    newest_dir = newest_dir.replace("\\", os.sep)
-                    self.last_model_path = newest_dir
-                    if entry:
-                        entry.delete(0, tk.END)
-                        entry.insert(0, last_model_path)
+                        required_folders = ["vae", "unet", "tokenizer", "text_encoder"]
+                        newest_dirs = sorted(glob.iglob(last_output_path + os.sep + '*'), key=os.path.getctime, reverse=True)
+                        #sort newest_dirs by date
+                        for newest_dir in newest_dirs:
+                            #check if the newest dir has all the required folders
+                            if all(x in os.listdir(newest_dir) for x in required_folders):
+                                last_model_path = newest_dir.replace("/", os.sep).replace("\\", os.sep)
+                                if entry:
+                                    entry.delete(0, tk.END)
+                                    entry.insert(0, last_model_path)
+                                    return
             else:
                 return
         else:
             return
-                    
+
+    def packageForCloud(self):
+        #check if there's an export folder in the cwd and if not create one
+        if not os.path.exists("export"):
+            os.mkdir("export")
+            os.mkdir("export" + os.sep + 'models')
+            os.mkdir("export" + os.sep + 'output')
+            os.mkdir("export" + os.sep + 'datasets')
+
+        #check if self.model_path is a directory
+        if os.path.isdir(self.model_path):
+            #get the directory name
+            model_name = os.path.basename(self.model_path)
+            #check if model_name can be an int
+            try:
+                model_name = int(model_name)
+                #get the parent directory name
+                model_name = os.path.basename(os.path.dirname(self.model_path))
+            except:
+                pass
+            #create a folder in the export folder with the model name
+            if not os.path.exists("export" + os.sep + 'models'+ os.sep + model_name):
+                os.mkdir("export" + os.sep + 'models'+ os.sep + model_name)
+            #copy the model to the export folder
+            shutil.copytree(self.model_path, "export" + os.sep +'models'+ os.sep+ model_name + os.sep,dirs_exist_ok=True)
+            self.model_path= 'models' + '/' + model_name
+        if os.path.isdir(self.vae_path):
+            #get the directory name
+            vae_name = os.path.basename(self.vae_path)
+            #create a folder in the export folder with the model name
+            if not os.path.exists("export" + os.sep + 'models'+ os.sep + vae_name):
+                os.mkdir("export" + os.sep + 'models'+ os.sep + vae_name)
+            #copy the model to the export folder
+            shutil.copytree(self.vae_path, "export" + os.sep +'models'+ os.sep+ vae_name + os.sep + vae_name,dirs_exist_ok=True)
+            self.vae_path= 'models' + '/' + vae_name
+        if self.output_path == '':
+            self.output_path = 'output'
+        else:
+            #get the dirname
+            output_name = os.path.basename(self.output_path)
+            #create a folder in the export folder with the model name
+            if not os.path.exists("export" + os.sep + 'output'+ os.sep + output_name):
+                os.mkdir("export" + os.sep + 'output'+ os.sep + output_name)
+            self.output_path = 'output' + '/' + output_name
+        #loop through the concepts and add them to the export folder
+        concept_counter = 0
+        new_concepts = []
+        for concept in self.concepts:
+            concept_counter += 1
+            concept_data_dir = os.path.basename(concept['instance_data_dir'])
+            #concept is a dict
+            #get the concept name
+            concept_name = concept['instance_prompt']
+            #if concept_name is ''
+            if concept_name == '':
+                concept_name = 'concept_' + str(concept_counter)
+                
+            #create a folder in the export/datasets folder with the concept name
+            #if not os.path.exists("export" + os.sep + 'datasets'+ os.sep + concept_name):
+            #    os.mkdir("export" + os.sep + 'datasets'+ os.sep + concept_name)
+            #copy the concept to the export folder
+            shutil.copytree(concept['instance_data_dir'], "export" + os.sep + 'datasets'+ os.sep + concept_data_dir ,dirs_exist_ok=True)
+            concept_class_name = concept['class_prompt']
+            if concept_class_name == '':
+                #if class_data_dir is ''
+                if concept['class_data_dir'] != '':
+                    concept_class_name = 'class_' + str(concept_counter)
+                    #create a folder in the export/datasets folder with the concept name
+                    if not os.path.exists("export" + os.sep + 'datasets'+ os.sep + concept_class_name):
+                        os.mkdir("export" + os.sep + 'datasets'+ os.sep + concept_class_name)
+                    #copy the concept to the export folder
+                    shutil.copytree(concept['class_data_dir'], "export" + os.sep + 'datasets'+ os.sep + concept_class_name+ os.sep,dirs_exist_ok=True)
+            else:
+                if concept['class_data_dir'] != '':
+                    #create a folder in the export/datasets folder with the concept name
+                    if not os.path.exists("export" + os.sep + 'datasets'+ os.sep + concept_class_name):
+                        os.mkdir("export" + os.sep + 'datasets'+ os.sep + concept_class_name)
+                    #copy the concept to the export folder
+                    shutil.copytree(concept['class_data_dir'], "export" + os.sep + 'datasets'+ os.sep + concept_class_name+ os.sep,dirs_exist_ok=True)
+            #create a new concept dict
+            new_concept = {}
+            new_concept['instance_prompt'] = concept_name
+            new_concept['instance_data_dir'] = 'datasets' + '/' + concept_data_dir 
+            new_concept['class_prompt'] = concept_class_name
+            new_concept['class_data_dir'] = 'datasets' + '/' + concept_class_name if concept_class_name != '' else ''
+            new_concept['do_not_balance'] = concept['do_not_balance']
+            new_concept['use_sub_dirs'] = concept['use_sub_dirs']
+            new_concepts.append(new_concept)
+        #make scripts folder
+        self.save_concept_to_json(filename='export' + os.sep + 'stabletune_concept_list.json', preMadeConcepts=new_concepts)
+        if not os.path.exists("export" + os.sep + 'scripts'):
+            os.mkdir("export" + os.sep + 'scripts')
+        #copy the scripts/trainer.py the scripts folder
+        shutil.copy('scripts' + os.sep + 'trainer.py', "export" + os.sep + 'scripts' + os.sep + 'trainer.py')
     def caption_buddy(self):
         import captionBuddy
         #self.master.overrideredirect(False)
@@ -2544,7 +2700,7 @@ class App(ctk.CTk):
         #unset the focus on the button
         #self.master.focus_set()
 
-    def save_concept_to_json(self,filename=None):
+    def save_concept_to_json(self,filename=None,preMadeConcepts=None):
         #dialog box to select the file to save to
         if filename == None:
             file = fd.asksaveasfile(mode='w', defaultextension=".json", filetypes=[("JSON", "*.json")])
@@ -2554,14 +2710,19 @@ class App(ctk.CTk):
         else:
             file = open(filename, 'w')
         if file != None:
-            concepts = []
-            for widget in self.concept_widgets:
-                concept = widget.concept
-                concept_dict = {'instance_prompt' : concept.concept_name, 'class_prompt' : concept.concept_class_name, 'instance_data_dir' : concept.concept_path, 'class_data_dir' : concept.concept_class_path, 'do_not_balance' : concept.concept_do_not_balance, 'use_sub_dirs' : concept.process_sub_dirs}
-                concepts.append(concept_dict)
-            if file != None:
-                #write the json to the file
-                json.dump(concepts, file, indent=4)
+            if preMadeConcepts == None:
+                concepts = []
+                for widget in self.concept_widgets:
+                    concept = widget.concept
+                    concept_dict = {'instance_prompt' : concept.concept_name, 'class_prompt' : concept.concept_class_name, 'instance_data_dir' : concept.concept_path, 'class_data_dir' : concept.concept_class_path, 'do_not_balance' : concept.concept_do_not_balance, 'use_sub_dirs' : concept.process_sub_dirs}
+                    concepts.append(concept_dict)
+                if file != None:
+                    #write the json to the file
+                    json.dump(concepts, file, indent=4)
+                    #close the file
+                    file.close()
+            else:
+                json.dump(preMadeConcepts, file, indent=4)
                 #close the file
                 file.close()
     def load_concept_from_json(self):
@@ -2784,6 +2945,7 @@ class App(ctk.CTk):
         configure['execute_post_conversion'] = self.convert_to_ckpt_after_training_var.get()
         configure['disable_cudnn_benchmark'] = self.disable_cudnn_benchmark_var.get()
         configure['sample_step_interval'] = self.sample_step_interval_entry.get()
+        configure['conditional_dropout'] = self.conditional_dropout_entry.get()
 
         #save the configure file
         #if the file exists, delete it
@@ -2902,6 +3064,8 @@ class App(ctk.CTk):
         self.disable_cudnn_benchmark_var.set(configure["disable_cudnn_benchmark"])
         self.sample_step_interval_entry.delete(0, tk.END)
         self.sample_step_interval_entry.insert(0, configure["sample_step_interval"])
+        self.conditional_dropout_entry.delete(0, tk.END)
+        self.conditional_dropout_entry.insert(0, configure["conditional_dropout"])
 
             
 
@@ -2962,6 +3126,11 @@ class App(ctk.CTk):
         self.convert_to_ckpt_after_training = self.convert_to_ckpt_after_training_var.get()
         self.disable_cudnn_benchmark = self.disable_cudnn_benchmark_var.get()
         self.sample_step_interval = self.sample_step_interval_entry.get()
+        #self.cloud_mode = self.runpod_mode_var.get()
+        self.conditional_dropout = self.conditional_dropout_entry.get()
+        #if self.cloud_mode == True:
+        #    export='Linux'
+        #    self.packageForCloud()
         if int(self.train_epocs) == 0 or self.train_epocs == '':
             messagebox.showerror("Error", "Number of training epochs must be greater than 0")
             return
@@ -3171,7 +3340,21 @@ class App(ctk.CTk):
                 batBase += ' --sample_on_training_start'
             else:
                 batBase += f' "--sample_on_training_start" '
-        #save configure
+        try:
+            if self.conditional_dropout != '' or self.conditional_dropout != ' ' or self.conditional_dropout != '0':
+                #if % is in the string, remove it
+                if '%' in self.conditional_dropout:
+                    self.conditional_dropout = self.conditional_dropout.replace('%', '')
+                #convert to float from percentage string
+                self.conditional_dropout = float(self.conditional_dropout) / 100
+                #print(self.conditional_dropout)
+                if export == 'Linux':
+                    batBase += f' --conditional_dropout={self.conditional_dropout}'
+                else:
+                    batBase += f' "--conditional_dropout={self.conditional_dropout}" '
+            #save configure
+        except:
+            pass
         self.save_config('stabletune_last_run.json')
         
         if export == False:
@@ -3202,14 +3385,26 @@ class App(ctk.CTk):
                 f.write(batBase)
             #show message
             messagebox.showinfo("Export", "Exported to train.bat")
-        elif export == 'Linux':
+        elif export == 'Linux' and self.cloud_mode == False:
             #write batBase to a shell script
             with open("train.sh", "w", encoding="utf-8") as f:
                 f.write(batBase)
             #show message
             messagebox.showinfo("Export", "Exported to train.sh.\nDon't forget to take stabletune_concept_list.json with you!")
             #close the window
-
+        '''
+        elif export == 'Linux' and self.cloud_mode == True:
+            with open("export"+os.sep+"train.sh", "w", encoding="utf-8") as f:
+                f.write(batBase)
+            
+            #zip up everything in export without the folder itself
+            shutil.make_archive('export', 'zip', 'export')
+            #delete the export folder
+            shutil.rmtree('export')
+            #show message
+            messagebox.showinfo("Export", "Exported to train.sh.\nDon't forget to take stabletune_concept_list.json with you!")
+            #close the window
+        '''
         
 
 
