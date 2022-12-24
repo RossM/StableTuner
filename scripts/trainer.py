@@ -58,7 +58,20 @@ class bcolors:
 logger = get_logger(__name__)
 def parse_args():
     parser = argparse.ArgumentParser(description="Simple example of a training script.")
-    parser.add_argument('--duplicate_fill_buckets', default=False, action="store_true")
+    parser.add_argument(
+        "--aspect_mode",
+        type=str,
+        default='dynamic',
+        required=False,
+        help="Path to pretrained model or model identifier from huggingface.co/models.",
+    )
+    parser.add_argument(
+        "--aspect_mode_action_preference",
+        type=str,
+        default='add',
+        required=False,
+        help="Path to pretrained model or model identifier from huggingface.co/models.",
+    )
     parser.add_argument('--use_ema',default=False,action="store_true", help='Use EMA for finetuning')
     parser.add_argument('--clip_penultimate',default=False,action="store_true", help='Use penultimate CLIP layer for text embedding')
     parser.add_argument("--conditional_dropout", type=float, default=None,required=False, help="Conditional dropout probability")
@@ -495,7 +508,8 @@ class AutoBucketing(Dataset):
                  with_prior_loss=False,
                  use_text_files_as_captions=False,
                  conditional_dropout=None,
-                 duplicate_fill_buckets=False,
+                 aspect_mode='dynamic',
+                 action_preference='dynamic'
                  ):
 
         self.debug_level = debug_level
@@ -515,7 +529,8 @@ class AutoBucketing(Dataset):
         self.with_prior_loss = with_prior_loss
         self.use_text_files_as_captions = use_text_files_as_captions
         self.conditional_dropout = conditional_dropout
-        self.duplicate_fill_buckets = duplicate_fill_buckets
+        self.aspect_mode = aspect_mode
+        self.action_preference = action_preference
         self.image_transforms = transforms.Compose(
             [
                 transforms.ToTensor(),
@@ -525,7 +540,7 @@ class AutoBucketing(Dataset):
         #shared_dataloader = None
         print(f" {bcolors.WARNING}Creating new dataloader singleton{bcolors.ENDC}")   
 
-        shared_dataloader = DataLoaderMultiAspect(concepts_list, debug_level=debug_level,resolution=self.resolution, batch_size=self.batch_size, flip_p=flip_p,use_image_names_as_captions=self.use_image_names_as_captions,add_class_images_to_dataset=self.add_class_images_to_dataset,balance_datasets=self.balance_datasets,with_prior_loss=self.with_prior_loss,use_text_files_as_captions=self.use_text_files_as_captions,duplicate_fill_buckets=self.duplicate_fill_buckets)
+        shared_dataloader = DataLoaderMultiAspect(concepts_list, debug_level=debug_level,resolution=self.resolution, batch_size=self.batch_size, flip_p=flip_p,use_image_names_as_captions=self.use_image_names_as_captions,add_class_images_to_dataset=self.add_class_images_to_dataset,balance_datasets=self.balance_datasets,with_prior_loss=self.with_prior_loss,use_text_files_as_captions=self.use_text_files_as_captions,aspect_mode=self.aspect_mode,action_preference=self.action_preference)
         
         #print(self.image_train_items)
         if self.with_prior_loss and self.add_class_images_to_dataset == False:
@@ -566,18 +581,17 @@ class AutoBucketing(Dataset):
                 #print('   ' +str(i))
 
         
-        #print(self.image_train_items)
         print()
         print(f" {bcolors.WARNING} ** Validation Set: {set}, steps: {self._length / batch_size:.0f}, repeats: {repeats} {bcolors.ENDC}")   
-
         print()
-    
+        
     
     def __len__(self):
         return self._length
 
     def __getitem__(self, i):
         idx = i % self.num_train_images
+        #print(idx)
         image_train_item = self.image_train_items[idx]
         
         example = self.__get_image_for_trainer(image_train_item,debug_level=self.debug_level)
@@ -729,7 +743,7 @@ class DataLoaderMultiAspect():
     batch_size: number of images per batch
     flip_p: probability of flipping image horizontally (i.e. 0-0.5)
     """
-    def __init__(self,concept_list, seed=555, debug_level=0,resolution=512, batch_size=1, flip_p=0.0,use_image_names_as_captions=True,add_class_images_to_dataset=False,balance_datasets=False,with_prior_loss=False,use_text_files_as_captions=False,duplicate_fill_buckets=False):
+    def __init__(self,concept_list, seed=555, debug_level=0,resolution=512, batch_size=1, flip_p=0.0,use_image_names_as_captions=True,add_class_images_to_dataset=False,balance_datasets=False,with_prior_loss=False,use_text_files_as_captions=False,aspect_mode='dynamic',action_preference='add'):
         self.resolution = resolution
         self.debug_level = debug_level
         self.flip_p = flip_p
@@ -738,7 +752,8 @@ class DataLoaderMultiAspect():
         self.with_prior_loss = with_prior_loss
         self.add_class_images_to_dataset = add_class_images_to_dataset
         self.use_text_files_as_captions = use_text_files_as_captions
-        self.duplicate_fill_buckets = duplicate_fill_buckets
+        self.aspect_mode = aspect_mode
+        self.action_preference = action_preference
         prepared_train_data = []
         
         self.aspects = get_aspect_buckets(resolution)
@@ -775,7 +790,7 @@ class DataLoaderMultiAspect():
                 use_sub_dirs = False
             self.image_paths = []
             #self.class_image_paths = []
-            min_concept_num_images = -1
+            min_concept_num_images = None
             if balance_datasets:
                 min_concept_num_images = balance_cocnept_list[concept_list.index(concept)]
             data_root = concept['instance_data_dir']
@@ -792,7 +807,7 @@ class DataLoaderMultiAspect():
                 use_image_names_as_captions = False
                 prepared_train_data.extend(self.__prescan_images(debug_level, self.image_paths, flip_p,use_image_names_as_captions,concept_class_prompt,use_text_files_as_captions=self.use_text_files_as_captions)) # ImageTrainItem[]
             
-        self.image_caption_pairs = self.__bucketize_images(prepared_train_data, batch_size=batch_size, debug_level=debug_level,duplicate_fill_buckets=self.duplicate_fill_buckets)
+        self.image_caption_pairs = self.__bucketize_images(prepared_train_data, batch_size=batch_size, debug_level=debug_level,aspect_mode=self.aspect_mode,action_preference=self.action_preference)
         if self.with_prior_loss and add_class_images_to_dataset == False:
             self.class_image_caption_pairs = []
             for concept in concept_list:
@@ -803,7 +818,7 @@ class DataLoaderMultiAspect():
                 random.Random(seed).shuffle(self.image_paths)
                 use_image_names_as_captions = False
                 self.class_image_caption_pairs.extend(self.__prescan_images(debug_level, self.class_images_path, flip_p,use_image_names_as_captions,concept_class_prompt,use_text_files_as_captions=self.use_text_files_as_captions))
-            self.class_image_caption_pairs = self.__bucketize_images(self.class_image_caption_pairs, batch_size=batch_size, debug_level=debug_level,duplicate_fill_buckets=self.duplicate_fill_buckets)
+            self.class_image_caption_pairs = self.__bucketize_images(self.class_image_caption_pairs, batch_size=batch_size, debug_level=debug_level,aspect_mode=self.aspect_mode,action_preference=self.action_preference)
         if debug_level > 0: print(f" * DLMA Example: {self.image_caption_pairs[0]} images")
         #print the length of image_caption_pairs
         print(f" {bcolors.WARNING} Number of image-caption pairs: {len(self.image_caption_pairs)}{bcolors.ENDC}") 
@@ -850,50 +865,90 @@ class DataLoaderMultiAspect():
             image_train_item = ImageTrainItem(image=None, caption=identifier, target_wh=target_wh, pathname=pathname, flip_p=flip_p)
 
             decorated_image_train_items.append(image_train_item)
-
         return decorated_image_train_items
 
     @staticmethod
-    def __bucketize_images(prepared_train_data: list, batch_size=1, debug_level=0,duplicate_fill_buckets=False):
+    def __bucketize_images(prepared_train_data: list, batch_size=1, debug_level=0,aspect_mode='dynamic',action_preference='add'):
         """
         Put images into buckets based on aspect ratio with batch_size*n images per bucket, discards remainder
         """
+        
         # TODO: this is not terribly efficient but at least linear time
         buckets = {}
-
         for image_caption_pair in prepared_train_data:
             target_wh = image_caption_pair.target_wh
 
             if (target_wh[0],target_wh[1]) not in buckets:
                 buckets[(target_wh[0],target_wh[1])] = []
             buckets[(target_wh[0],target_wh[1])].append(image_caption_pair) 
-        
         print(f" ** Number of buckets: {len(buckets)}")
-        if len(buckets) > 1: 
-            for bucket in buckets:
-                print(f" ** Bucket {bucket} has {len(buckets[bucket])} images")
-                truncate_count = len(buckets[bucket]) % batch_size
-                current_bucket_size = len(buckets[bucket])
-                if duplicate_fill_buckets == False:
-                    buckets[bucket] = buckets[bucket][:current_bucket_size - truncate_count]
-                    print(f"  ** Bucket {bucket} with {current_bucket_size}, will drop {truncate_count} images due to batch size {batch_size}")
+        for bucket in buckets:
+            bucket_len = len(buckets[bucket])
+            #real_len = len(buckets[bucket])+1
+            #print(real_len)
+            truncate_amount = bucket_len % batch_size
+            add_amount = batch_size - bucket_len % batch_size
+            action = None
+            #print(f" ** Bucket {bucket} has {bucket_len} images")
+            if aspect_mode == 'dynamic':
+                if batch_size == bucket_len:
+                    action = None
+                elif add_amount < truncate_amount and add_amount != 0 and add_amount != batch_size or truncate_amount == 0:
+                    action = 'add'
+                    #print(f'should add {add_amount}')
+                elif truncate_amount < add_amount and truncate_amount != 0 and truncate_amount != batch_size and batch_size < bucket_len:
+                    #print(f'should truncate {truncate_amount}')
+                    action = 'truncate'
+                    #truncate the bucket
+                elif truncate_amount == add_amount:
+                    if action_preference == 'add':
+                        action = 'add'
+                    elif action_preference == 'truncate':
+                        action = 'truncate'
+                elif batch_size > bucket_len:
+                    action = 'add'
+                
+            elif aspect_mode == 'add':
+                action = 'add'
+            elif aspect_mode == 'truncate':
+                action = 'truncate'
+            if action == None:
+                action = None
+                #print('no need to add or truncate')
+            if action == None:
+                #print('test')
+                current_bucket_size = bucket_len
+                print(f"  ** Bucket {bucket} found {bucket_len}, nice!")
+            elif action == 'add':
+                #copy the bucket
+                shuffleBucket = random.sample(buckets[bucket], bucket_len)     
+                #add the images to the bucket
+                current_bucket_size = bucket_len
+                truncate_count = (bucket_len) % batch_size
+                #how many images to add to the bucket to fill the batch
+                addAmount = batch_size - truncate_count
+                if addAmount != batch_size:
+                    added=0
+                    while added != addAmount:
+                        randomIndex = random.randint(0,len(shuffleBucket)-1)
+                        #print(str(randomIndex))
+                        buckets[bucket].append(shuffleBucket[randomIndex])
+                        added+=1
+                    print(f"  ** Bucket {bucket} found {bucket_len} images, will duplicate {added} images due to batch size {batch_size}")
                 else:
-                    #pick random images from the bucket to fill the batch
-                    shuffleBucket = buckets[bucket]
-                    #add the images to the bucket
-                    addAmount = batch_size - truncate_count
-                    for i in range(0,addAmount):
-                        bukcetLen = len(buckets[bucket])
-                        i = random.randint(0,bukcetLen-1)
-                        buckets[bucket].append(shuffleBucket[i])
-
-                    print(f"  ** Bucket {bucket} with {current_bucket_size}, will duplicate {addAmount} images due to batch size {batch_size}")
-                    
+                    print(f"  ** Bucket {bucket} found {bucket_len}, nice!")
+            elif action == 'truncate':
+                truncate_count = (bucket_len) % batch_size
+                current_bucket_size = bucket_len
+                buckets[bucket] = buckets[bucket][:current_bucket_size - truncate_count]
+                print(f"  ** Bucket {bucket} found {bucket_len} images, will drop {truncate_count} images due to batch size {batch_size}")
+            
 
         # flatten the buckets
         image_caption_pairs = []
         for bucket in buckets:
             image_caption_pairs.extend(buckets[bucket])
+        
         return image_caption_pairs
 
     @staticmethod
@@ -1403,7 +1458,8 @@ def main():
             repeats=args.dataset_repeats,
             use_text_files_as_captions=args.use_text_files_as_captions,
             conditional_dropout=args.conditional_dropout,
-            duplicate_fill_buckets=args.duplicate_fill_buckets,
+            aspect_mode=args.aspect_mode,
+            action_preference=args.aspect_mode_action_preference,
         )
     else:
         train_dataset = DreamBoothDataset(
@@ -1529,9 +1585,8 @@ def main():
                     del batch
                     del cached_latent
                     del cached_text_enc
-                    gc.collect()
+                    #gc.collect()
                     #torch.cuda.empty_cache()
-            
             if args.save_latents_cache:
                 if not latent_cache_dir.exists():
                     latent_cache_dir.mkdir(parents=True)
@@ -1847,14 +1902,32 @@ def main():
         try:
             def toggle_gui(event = None):
                 if keyboard.is_pressed('ctrl'):
-                    print(f" {bcolors.WARNING}GUI will boot as soon as the current step finish.{bcolors.ENDC}")
+                    print(f" {bcolors.WARNING}GUI will boot as soon as the current step is done.{bcolors.ENDC}")
                     nonlocal mid_generation
                     mid_generation = True
+            def toggle_checkpoint(event = None):
+                if keyboard.is_pressed('ctrl'):
+                    print(f" {bcolors.WARNING}Saving the model as soon as this epoch is done.{bcolors.ENDC}")
+                    #nonlocal mid_checkpoint
+                    nonlocal mid_checkpoint
+                    mid_checkpoint = True
+            def toggle_sample(event = None):
+                if keyboard.is_pressed('ctrl'):
+                    print(f" {bcolors.WARNING}Sampling will begin as soon as this epoch is done.{bcolors.ENDC}")
+                    #nonlocal mid_checkpoint
+                    nonlocal mid_sample
+                    mid_sample = True
             keyboard.on_press_key('f12',toggle_gui)
-            print(f"{bcolors.WARNING}Use 'CTRL+F12' mid-training to open up a generation GUI to play around with the model!{bcolors.ENDC}")
+            keyboard.on_press_key('f11',toggle_checkpoint)
+            keyboard.on_press_key('f10',toggle_sample)
+            print(f"{bcolors.WARNING}Use 'CTRL+F12' to open up a GUI to play around with the model (will pause training){bcolors.ENDC}")
+            print(f"{bcolors.WARNING}Use 'CTRL+F11' to save a checkpoint of the current epoch{bcolors.ENDC}")
+            print(f"{bcolors.WARNING}Use 'CTRL+F10' to generate samples for current epoch{bcolors.ENDC}")
         except:
             pass
         mid_generation = False
+        mid_checkpoint = False
+        mid_sample = False
         #lambda set mid_generation to true
         
         
@@ -2005,7 +2078,13 @@ def main():
                         save_and_sample_weights(epoch,'epoch')
                     else:
                         save_and_sample_weights(epoch,'epoch',False)
-            
+            if epoch % args.save_every_n_epoch and mid_checkpoint==True or mid_sample==True:
+                if mid_checkpoint==True:
+                    save_and_sample_weights(epoch,'epoch',True)
+                    mid_checkpoint=False
+                elif mid_sample==True:
+                    save_and_sample_weights(epoch,'epoch',False)
+                    mid_sample=False
             accelerator.wait_for_everyone()
     except Exception:
         try:
