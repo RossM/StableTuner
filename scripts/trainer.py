@@ -511,7 +511,7 @@ class AutoBucketing(Dataset):
                  aspect_mode='dynamic',
                  action_preference='dynamic'
                  ):
-
+        
         self.debug_level = debug_level
         self.resolution = resolution
         self.center_crop = center_crop
@@ -538,7 +538,7 @@ class AutoBucketing(Dataset):
             ]
         )
         #shared_dataloader = None
-        print(f" {bcolors.WARNING}Creating new dataloader singleton{bcolors.ENDC}")   
+        print(f" {bcolors.WARNING}Creating Auto Bucketing Dataloader{bcolors.ENDC}")   
 
         shared_dataloader = DataLoaderMultiAspect(concepts_list, debug_level=debug_level,resolution=self.resolution, batch_size=self.batch_size, flip_p=flip_p,use_image_names_as_captions=self.use_image_names_as_captions,add_class_images_to_dataset=self.add_class_images_to_dataset,balance_datasets=self.balance_datasets,with_prior_loss=self.with_prior_loss,use_text_files_as_captions=self.use_text_files_as_captions,aspect_mode=self.aspect_mode,action_preference=self.action_preference)
         
@@ -631,7 +631,9 @@ class AutoBucketing(Dataset):
                 truncation=True,
                 max_length=self.tokenizer.model_max_length,
             ).input_ids
+            image_train_item.self_destruct()
             return example
+            
         if class_img==True:
             image_train_tmp = image_train_item.hydrate(crop=False, save=4, crop_jitter=self.crop_jitter)
             image_train_tmp_image = Image.fromarray(self.normalize8(image_train_tmp.image)).convert("RGB")
@@ -642,6 +644,7 @@ class AutoBucketing(Dataset):
                 truncation=True,
                 max_length=self.tokenizer.model_max_length,
             ).input_ids
+            image_train_item.self_destruct()
             return example
 
 _RANDOM_TRIM = 0.04
@@ -657,14 +660,18 @@ class ImageTrainItem():
         self.caption = caption
         self.target_wh = target_wh
         self.pathname = pathname
+        self.flip_p = flip_p
         self.flip = transforms.RandomHorizontalFlip(p=flip_p)
         self.cropped_img = None
-
+        self.is_dupe = []
         if image is None:
             self.image = []
         else:
             self.image = image
-
+    def self_destruct(self):
+        self.image = []
+        self.cropped_img = None
+        self.is_dupe.append(1)
     def hydrate(self, crop=False, save=False, crop_jitter=20):
         """
         crop: hard center crop to 512x512
@@ -672,6 +679,10 @@ class ImageTrainItem():
         crop_jitter: randomly shift cropp by N pixels when using multiple aspect ratios to improve training quality
         """
         if not hasattr(self, 'image') or len(self.image) == 0:
+            if len(self.is_dupe) > 0:
+                chance = float(len(self.is_dupe)) / 10.0
+                self.flip = transforms.RandomHorizontalFlip(p=self.flip_p+chance if chance < 1.0 else 1.0)
+                self.crop_jitter = crop_jitter + (len(self.is_dupe) * 10) if crop_jitter < 50 else 50
             self.image = Image.open(self.pathname).convert('RGB')
 
             width, height = self.image.size
@@ -718,7 +729,10 @@ class ImageTrainItem():
                         self.image = self.image.crop((0, top, width, bottom))
                         #LAZCOS resample
                 self.image = self.image.resize(self.target_wh, resample=Image.Resampling.LANCZOS)
-
+            #print the pixel count of the image
+            #print path to image file
+            #print(self.pathname)
+            #print(self.image.size[0] * self.image.size[1])
             self.image = self.flip(self.image)
 
         if type(self.image) is not np.ndarray:
@@ -797,6 +811,12 @@ class DataLoaderMultiAspect():
             data_root_class = concept['class_data_dir']
             concept_prompt = concept['instance_prompt']
             concept_class_prompt = concept['class_prompt']
+            if 'flip_p' in concept.keys():
+                flip_p = concept['flip_p']
+                if flip_p == '':
+                    flip_p = 0.0
+                else:
+                    flip_p = float(flip_p)
             self.__recurse_data_root(self=self, recurse_root=data_root,use_sub_dirs=use_sub_dirs)
             random.Random(seed).shuffle(self.image_paths)
             prepared_train_data.extend(self.__prescan_images(debug_level, self.image_paths, flip_p,use_image_names_as_captions,concept_prompt,use_text_files_as_captions=self.use_text_files_as_captions)[0:min_concept_num_images]) # ImageTrainItem[]
@@ -953,16 +973,25 @@ class DataLoaderMultiAspect():
 
     @staticmethod
     def __recurse_data_root(self, recurse_root,use_sub_dirs=True,class_images=False):
+        progress_bar = tqdm(os.listdir(recurse_root), desc=f" {bcolors.WARNING} ** Processing {recurse_root}{bcolors.ENDC}")
         for f in os.listdir(recurse_root):
             current = os.path.join(recurse_root, f)
-
             if os.path.isfile(current):
                 ext = os.path.splitext(f)[1].lower()
                 if ext in ['.jpg', '.jpeg', '.png', '.bmp', '.webp']:
+                    #try to open the file to make sure it's a valid image
+                    try:
+                        img = Image.open(current)
+                    except:
+                        print(f" ** Skipping {current} because it failed to open, please check the file")
+                        progress_bar.update(1)
+                        continue
+                    del img
                     if class_images == False:
                         self.image_paths.append(current)
                     else:
                         self.class_images_path.append(current)
+            progress_bar.update(1)
         if use_sub_dirs:
             sub_dirs = []
 
@@ -1069,16 +1098,26 @@ class DreamBoothDataset(Dataset):
                 data = recurse_root['class_data_dir']
         else:
             concept_token = None
+        #progress bar
+        progress_bar = tqdm(os.listdir(data), desc=f" {bcolors.WARNING} ** Processing {data}{bcolors.ENDC}")
         for f in os.listdir(data):
             current = os.path.join(data, f)
 
             if os.path.isfile(current):
                 ext = os.path.splitext(f)[1].lower()
                 if ext in ['.jpg', '.jpeg', '.png', '.bmp', '.webp']:
+                    try:
+                        img = Image.open(current)
+                    except:
+                        print(f" ** Skipping {current} because it failed to open, please check the file")
+                        progress_bar.update(1)
+                        continue
+                    del img
                     if class_images == False:
                         self.image_paths.append([current,concept_token])
                     else:
                         self.class_images_path.append([current,concept_token])
+            progress_bar.update(1)
         if use_sub_dirs:
             sub_dirs = []
 
@@ -1162,9 +1201,22 @@ class PromptDataset(Dataset):
         example["index"] = index
         return example
 
-
+class CachedLatentsDataset(Dataset):
+    #stores paths and loads latents on the fly
+    def __init__(self, cache_paths=()):
+        self.cache_paths = cache_paths
+    def __len__(self):
+        return len(self.cache_paths)
+    def __getitem__(self, index):
+        self.cache = torch.load(self.cache_paths[index])
+        self.latents = self.cache.latents_cache[0]
+        self.text_encoder = self.cache.text_encoder_cache[0]
+        del self.cache
+        return self.latents, self.text_encoder
+    def add_pt_cache(self, cache_path):
+        self.cache_paths += (cache_path,)
 class LatentsDataset(Dataset):
-    def __init__(self, latents_cache, text_encoder_cache):
+    def __init__(self, latents_cache=None, text_encoder_cache=None):
         self.latents_cache = latents_cache
         self.text_encoder_cache = text_encoder_cache
     def add_latent(self, latent, text_encoder):
@@ -1172,11 +1224,12 @@ class LatentsDataset(Dataset):
         self.text_encoder_cache.append(text_encoder)
     def __len__(self):
         return len(self.latents_cache)
-
     def __getitem__(self, index):
         return self.latents_cache[index], self.text_encoder_cache[index]
-
-
+    def __add__(self, other):
+        latents_cache = self.latents_cache + other.latents_cache
+        text_encoder_cache = self.text_encoder_cache + other.text_encoder_cache
+        return LatentsDataset(latents_cache, text_encoder_cache)
 class AverageMeter:
     def __init__(self, name=None):
         self.name = name
@@ -1189,7 +1242,6 @@ class AverageMeter:
         self.sum += val * n
         self.count += n
         self.avg = self.sum / self.count
-
 
 def get_full_repo_name(model_id: str, organization: Optional[str] = None, token: Optional[str] = None):
     if token is None:
@@ -1377,7 +1429,7 @@ def main():
     if is_xformers_available():
         try:
             unet.enable_xformers_memory_efficient_attention()
-            vae.enable_xformers_memory_efficient_attention()
+            #vae.enable_xformers_memory_efficient_attention()
         except Exception as e:
             logger.warning(
                 "Could not enable memory efficient attention. Make sure xformers is installed"
@@ -1496,12 +1548,14 @@ def main():
 
         pixel_values = torch.stack(pixel_values)
         pixel_values = pixel_values.to(memory_format=torch.contiguous_format).float()
+        
         input_ids = tokenizer.pad(
             {"input_ids": input_ids},
             padding="max_length",
             max_length=tokenizer.model_max_length,
             return_tensors="pt",\
             ).input_ids
+            
         batch = {
             "input_ids": input_ids,
             "pixel_values": pixel_values,
@@ -1558,21 +1612,42 @@ def main():
         text_encoder.to(accelerator.device, dtype=weight_dtype)
 
     if not args.not_cache_latents:
+        cached_dataset = CachedLatentsDataset()
+        gen_cache = False
+        data_len = len(train_dataloader)
         latent_cache_dir = Path(args.output_dir, "logs", "latent_cache")
         #check if latents_cache.pt exists in the output_dir
         if not os.path.exists(latent_cache_dir):
             os.makedirs(latent_cache_dir)
-        if not os.path.exists(os.path.join(latent_cache_dir, "latents_cache.pt")) or args.regenerate_latent_cache:
-            if os.path.exists(os.path.join(latent_cache_dir, "latents_cache.pt")):
-                #if it exists, delete it
-                os.remove(os.path.join(latent_cache_dir, "latents_cache.pt"))
+        for i in range(0,data_len-1):
+            if not os.path.exists(os.path.join(latent_cache_dir, f"latents_cache_{i}.pt")) or args.regenerate_latent_cache == True or args.save_latents_cache == False:
+                gen_cache = True
+                
+        if gen_cache == False :
+            print(f" {bcolors.OKGREEN}Loading Latent Cache from {latent_cache_dir}{bcolors.ENDC}")
+            del vae
+            if not args.train_text_encoder:
+                del text_encoder
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+            #load all the cached latents into a single dataset
+            train_dataset = LatentsDataset([], [])
+            for i in range(0,data_len-1):
+                cached_dataset.add_pt_cache(os.path.join(latent_cache_dir,f"latents_cache_{i}.pt"))
+                #train_dataset += torch.load(os.path.join(latent_cache_dir,f"latents_cache_{i}.pt"))
+                if not args.save_latents_cache:
+                    os.remove(os.path.join(latent_cache_dir,f"latents_cache_{i}.pt"))
+        if gen_cache == True:
+            #delete all the cached latents if they exist to avoid problems
+            if args.regenerate_latent_cache:
+                files = os.listdir(latent_cache_dir)
+                for file in files:
+                    os.remove(os.path.join(latent_cache_dir,file))
             print(f" {bcolors.WARNING}Generating latents cache...{bcolors.ENDC}") 
-
-            #latents_cache = []
-            #text_encoder_cache = []
-            train_dataset = LatentsDataset(([]), [])
-            for batch in tqdm(train_dataloader, desc="Caching latents"):
-                with torch.no_grad():
+            train_dataset = LatentsDataset([], [])
+            counter = 0
+            with torch.no_grad():
+                for batch in tqdm(train_dataloader, desc="Caching latents", bar_format='%s{l_bar}%s%s{bar}%s%s{r_bar}%s'%(bcolors.OKBLUE,bcolors.ENDC, bcolors.OKBLUE, bcolors.ENDC,bcolors.OKBLUE,bcolors.ENDC,)):
                     batch["pixel_values"] = batch["pixel_values"].to(accelerator.device, non_blocking=True, dtype=weight_dtype)
                     batch["input_ids"] = batch["input_ids"].to(accelerator.device, non_blocking=True)
                     
@@ -1585,24 +1660,38 @@ def main():
                     del batch
                     del cached_latent
                     del cached_text_enc
-                    #gc.collect()
-                    #torch.cuda.empty_cache()
-            if args.save_latents_cache:
-                if not latent_cache_dir.exists():
-                    latent_cache_dir.mkdir(parents=True)
-                torch.save(train_dataset, os.path.join(latent_cache_dir,"latents_cache.pt"))
-        else:
-            print(f" {bcolors.WARNING}Loading latents cache from file...{bcolors.ENDC}") 
-
-            train_dataset = torch.load(os.path.join(latent_cache_dir,"latents_cache.pt"))
-        train_dataloader = torch.utils.data.DataLoader(train_dataset, batch_size=1, collate_fn=lambda x: x, shuffle=False)
-
-        del vae
-        if not args.train_text_encoder:
-            del text_encoder
-        if torch.cuda.is_available():
+                    torch.save(train_dataset, os.path.join(latent_cache_dir,f"latents_cache_{counter}.pt"))
+                    cached_dataset.add_pt_cache(os.path.join(latent_cache_dir,f"latents_cache_{counter}.pt"))
+                    counter += 1
+                    train_dataset = LatentsDataset([], [])
+                    #if counter % 300 == 0:
+                        #train_dataloader = torch.utils.data.DataLoader(train_dataset, batch_size=1, collate_fn=lambda x: x, shuffle=False)
+                    #    gc.collect()
+                    #    torch.cuda.empty_cache()
+                    #    accelerator.free_memory()
+                        
+            #clear vram after caching latents
+            del vae
+            if not args.train_text_encoder:
+                del text_encoder
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+            #load all the cached latents into a single dataset
+            #train_dataset = LatentsDataset([], [])
+            for i in range(0,counter):
+                #train_dataset += torch.load(os.path.join(latent_cache_dir,f"latents_cache_{i}.pt"))
+                cached_dataset.add_pt_cache(os.path.join(latent_cache_dir,f"latents_cache_{i}.pt"))
+                if not args.save_latents_cache:
+                    os.remove(os.path.join(latent_cache_dir,f"latents_cache_{i}.pt"))
+            if not args.save_latents_cache:
+                #remove all the cached latents
+                for i in range(0,counter):
+                    if os.path.exists(os.path.join(latent_cache_dir, f"latents_cache_{i}.pt")):
+                        os.remove(os.path.join(latent_cache_dir,f"latents_cache_{i}.pt"))
+    train_dataloader = torch.utils.data.DataLoader(cached_dataset, batch_size=1, collate_fn=lambda x: x, shuffle=False)
+    if torch.cuda.is_available():
             torch.cuda.empty_cache()
-
+    print(f" {bcolors.OKGREEN}Latents are ready.{bcolors.ENDC}")
     # Scheduler and math around the number of training steps.
     overrode_max_train_steps = False
     num_update_steps_per_epoch = math.ceil(len(train_dataloader) / args.gradient_accumulation_steps)
@@ -1884,8 +1973,8 @@ def main():
                 print(f" {bcolors.OKGREEN}[*] Samples saved to {sample_dir}{bcolors.ENDC}")
 
     # Only show the progress bar once on each machine.
-    progress_bar = tqdm(range(args.max_train_steps), disable=not accelerator.is_local_main_process)
-    progress_bar_e = tqdm(range(args.num_train_epochs), disable=not accelerator.is_local_main_process)
+    progress_bar = tqdm(range(args.max_train_steps),bar_format='%s{l_bar}%s%s{bar}%s%s{r_bar}%s'%(bcolors.OKBLUE,bcolors.ENDC, bcolors.OKBLUE, bcolors.ENDC,bcolors.OKBLUE,bcolors.ENDC,), disable=not accelerator.is_local_main_process)
+    progress_bar_e = tqdm(range(args.num_train_epochs),bar_format='%s{l_bar}%s%s{bar}%s%s{r_bar}%s'%(bcolors.OKBLUE,bcolors.ENDC, bcolors.OKGREEN, bcolors.ENDC,bcolors.OKBLUE,bcolors.ENDC,), disable=not accelerator.is_local_main_process)
 
     progress_bar.set_description("Steps")
     progress_bar_e.set_description("Epochs")
@@ -1900,31 +1989,31 @@ def main():
     try:
         print(f" {bcolors.OKBLUE}Starting Training!{bcolors.ENDC}")
         try:
-            def toggle_gui(event = None):
-                if keyboard.is_pressed('ctrl'):
+            def toggle_gui(event=None):
+                if keyboard.is_pressed("ctrl") and keyboard.is_pressed("shift") and keyboard.is_pressed("g"):
                     print(f" {bcolors.WARNING}GUI will boot as soon as the current step is done.{bcolors.ENDC}")
                     nonlocal mid_generation
                     mid_generation = True
-            def toggle_checkpoint(event = None):
-                if keyboard.is_pressed('ctrl'):
+
+            def toggle_checkpoint(event=None):
+                if keyboard.is_pressed("ctrl") and keyboard.is_pressed("shift") and keyboard.is_pressed("s"):
                     print(f" {bcolors.WARNING}Saving the model as soon as this epoch is done.{bcolors.ENDC}")
-                    #nonlocal mid_checkpoint
                     nonlocal mid_checkpoint
                     mid_checkpoint = True
-            def toggle_sample(event = None):
-                if keyboard.is_pressed('ctrl'):
+
+            def toggle_sample(event=None):
+                if keyboard.is_pressed("ctrl") and keyboard.is_pressed("shift") and keyboard.is_pressed("p"):
                     print(f" {bcolors.WARNING}Sampling will begin as soon as this epoch is done.{bcolors.ENDC}")
-                    #nonlocal mid_checkpoint
                     nonlocal mid_sample
                     mid_sample = True
-            keyboard.on_press_key('f12',toggle_gui)
-            keyboard.on_press_key('f11',toggle_checkpoint)
-            keyboard.on_press_key('f10',toggle_sample)
-            print(f"{bcolors.WARNING}Use 'CTRL+F12' to open up a GUI to play around with the model (will pause training){bcolors.ENDC}")
-            print(f"{bcolors.WARNING}Use 'CTRL+F11' to save a checkpoint of the current epoch{bcolors.ENDC}")
-            print(f"{bcolors.WARNING}Use 'CTRL+F10' to generate samples for current epoch{bcolors.ENDC}")
         except:
             pass
+        keyboard.on_press_key("g", toggle_gui)
+        keyboard.on_press_key("s", toggle_checkpoint)
+        keyboard.on_press_key("p", toggle_sample)
+        print(f"{bcolors.WARNING}Use 'CTRL+SHIFT+G' to open up a GUI to play around with the model (will pause training){bcolors.ENDC}")
+        print(f"{bcolors.WARNING}Use 'CTRL+SHIFT+S' to save a checkpoint of the current epoch{bcolors.ENDC}")
+        print(f"{bcolors.WARNING}Use 'CTRL+SHIFT+P' to generate samples for current epoch{bcolors.ENDC}")
         mid_generation = False
         mid_checkpoint = False
         mid_sample = False
