@@ -1879,6 +1879,8 @@ class App(ctk.CTk):
             except:
                 pass
             #create a folder in the export folder with the model name
+            if not os.path.exists(self.full_export_path + os.sep + 'input_model'+ os.sep):
+                os.mkdir(self.full_export_path + os.sep + 'input_model'+ os.sep)
             if not os.path.exists(self.full_export_path + os.sep + 'input_model'+ os.sep + model_name):
                 os.mkdir(self.full_export_path + os.sep + 'input_model'+ os.sep + model_name)
             #copy the model to the export folder
