@@ -1688,7 +1688,7 @@ def main():
                 for i in range(0,counter):
                     if os.path.exists(os.path.join(latent_cache_dir, f"latents_cache_{i}.pt")):
                         os.remove(os.path.join(latent_cache_dir,f"latents_cache_{i}.pt"))
-    train_dataloader = torch.utils.data.DataLoader(cached_dataset, batch_size=1, collate_fn=lambda x: x, shuffle=False)
+        train_dataloader = torch.utils.data.DataLoader(cached_dataset, batch_size=1, collate_fn=lambda x: x, shuffle=False)
     if torch.cuda.is_available():
             torch.cuda.empty_cache()
     print(f" {bcolors.OKGREEN}Latents are ready.{bcolors.ENDC}")
