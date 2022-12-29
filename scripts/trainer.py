@@ -38,6 +38,7 @@ from diffusers import AutoencoderKL, DDIMScheduler, DDPMScheduler, DiffusionPipe
 from diffusers.optimization import get_scheduler
 from huggingface_hub import HfFolder, Repository, whoami
 from torchvision import transforms
+from torchvision.transforms import functional
 from tqdm.auto import tqdm
 from transformers import CLIPTextModel, CLIPTokenizer
 from typing import Dict, List, Generator, Tuple
@@ -58,6 +59,13 @@ class bcolors:
 logger = get_logger(__name__)
 def parse_args():
     parser = argparse.ArgumentParser(description="Simple example of a training script.")
+    parser.add_argument(
+        "--model_variant",
+        type=str,
+        default='base',
+        required=False,
+        help="Train Base/Inpaint/Depth2Img",
+    )
     parser.add_argument(
         "--aspect_mode",
         type=str,
@@ -91,12 +99,6 @@ def parse_args():
     )
     parser.add_argument(
         "--regenerate_latent_cache",
-        default=False,
-        action="store_true",
-        help="Will save and generate samples before training",
-    )
-    parser.add_argument(
-        "--save_latents_cache",
         default=False,
         action="store_true",
         help="Will save and generate samples before training",
@@ -339,7 +341,6 @@ def parse_args():
             "and an Nvidia Ampere GPU."
         ),
     )
-    parser.add_argument("--not_cache_latents", action="store_true", help="Do not precompute and cache latents from VAE.")
     parser.add_argument("--local_rank", type=int, default=-1, help="For distributed training: local_rank")
     parser.add_argument(
         "--concepts_list",
@@ -409,8 +410,8 @@ ASPECT_1024 = [[1024, 1024],
 [1728, 576], [576, 1728], 
 [1792, 576], [576, 1792]]
 ASPECT_768 = [[768,768],     # 589824 1:1
-    [832,704],[704,832],   # 585728 1.181:1
     [896,640],[640,896],   # 573440 1.4:1
+    [832,704],[704,832],   # 585728 1.181:1
     [960,576],[576,960],   # 552960 1.6:1
     [1024,576],[576,1024], # 524288 1.778:1
     [1088,512],[512,1088], # 497664 2.125:1
@@ -471,13 +472,16 @@ ASPECTS_512 = [[512,512],      # 262144 1:1
 
 #failsafe aspects
 ASPECTS = ASPECTS_512
-def get_aspect_buckets(resolution):
+def get_aspect_buckets(resolution,mode=None):
     if resolution < 512:
         raise ValueError("Resolution must be at least 512")
     try: 
         rounded_resolution = int(resolution / 64) * 64
         print(f" {bcolors.WARNING} Rounded resolution to: {rounded_resolution}{bcolors.ENDC}")   
         all_image_sizes = __get_all_aspects()
+        if mode == 'MJ':
+            #truncate to the first 3 resolutions
+            all_image_sizes = [x[0:3] for x in all_image_sizes]
         aspects = next(filter(lambda sizes: sizes[0][0]==rounded_resolution, all_image_sizes), None)
         ASPECTS = aspects
         #print(aspects)
@@ -492,25 +496,26 @@ def __get_all_aspects():
 
 class AutoBucketing(Dataset):
     def __init__(self,
-                 concepts_list,
-                 tokenizer=None,
-                 flip_p=0.0,
-                 repeats=1,
-                 debug_level=0,
-                 batch_size=1,
-                 set='val',
-                 resolution=512,
-                 center_crop=False,
-                 use_image_names_as_captions=True,
-                 add_class_images_to_dataset=None,
-                 balance_datasets=False,
-                 crop_jitter=20,
-                 with_prior_loss=False,
-                 use_text_files_as_captions=False,
-                 conditional_dropout=None,
-                 aspect_mode='dynamic',
-                 action_preference='dynamic'
-                 ):
+                    concepts_list,
+                    tokenizer=None,
+                    flip_p=0.0,
+                    repeats=1,
+                    debug_level=0,
+                    batch_size=1,
+                    set='val',
+                    resolution=512,
+                    center_crop=False,
+                    use_image_names_as_captions=True,
+                    add_class_images_to_dataset=None,
+                    balance_datasets=False,
+                    crop_jitter=20,
+                    with_prior_loss=False,
+                    use_text_files_as_captions=False,
+                    aspect_mode='dynamic',
+                    action_preference='dynamic',
+                    seed=555,
+                    model_variant='base'
+                    ):
         
         self.debug_level = debug_level
         self.resolution = resolution
@@ -528,19 +533,38 @@ class AutoBucketing(Dataset):
         self.crop_jitter = crop_jitter
         self.with_prior_loss = with_prior_loss
         self.use_text_files_as_captions = use_text_files_as_captions
-        self.conditional_dropout = conditional_dropout
         self.aspect_mode = aspect_mode
         self.action_preference = action_preference
+        self.model_variant = model_variant
         self.image_transforms = transforms.Compose(
             [
                 transforms.ToTensor(),
                 transforms.Normalize([0.5], [0.5]),
             ]
         )
+        self.mask_transforms = transforms.Compose(
+            [
+                transforms.ToTensor(),
+            ]
+        )
+        self.seed = seed
         #shared_dataloader = None
-        print(f" {bcolors.WARNING}Creating Auto Bucketing Dataloader{bcolors.ENDC}")   
+        print(f" {bcolors.WARNING}Creating Auto Bucketing Dataloader{bcolors.ENDC}")
 
-        shared_dataloader = DataLoaderMultiAspect(concepts_list, debug_level=debug_level,resolution=self.resolution, batch_size=self.batch_size, flip_p=flip_p,use_image_names_as_captions=self.use_image_names_as_captions,add_class_images_to_dataset=self.add_class_images_to_dataset,balance_datasets=self.balance_datasets,with_prior_loss=self.with_prior_loss,use_text_files_as_captions=self.use_text_files_as_captions,aspect_mode=self.aspect_mode,action_preference=self.action_preference)
+        shared_dataloader = DataLoaderMultiAspect(concepts_list,
+         debug_level=debug_level,
+         resolution=self.resolution,
+         seed=self.seed,
+         batch_size=self.batch_size, 
+         flip_p=flip_p,
+         use_image_names_as_captions=self.use_image_names_as_captions,
+         add_class_images_to_dataset=self.add_class_images_to_dataset,
+         balance_datasets=self.balance_datasets,
+         with_prior_loss=self.with_prior_loss,
+         use_text_files_as_captions=self.use_text_files_as_captions,
+         aspect_mode=self.aspect_mode,
+         action_preference=self.action_preference,
+         model_variant=self.model_variant)
         
         #print(self.image_train_items)
         if self.with_prior_loss and self.add_class_images_to_dataset == False:
@@ -554,37 +578,11 @@ class AutoBucketing(Dataset):
             self.image_train_items = shared_dataloader.get_all_images()
             self.num_train_images = self.num_train_images + len(self.image_train_items)
             self._length = max(math.trunc(self.num_train_images * repeats), batch_size) - self.num_train_images % self.batch_size
-        #amoutn of images to drop due to conditional dropout
-        if self.conditional_dropout != None:
-            #print('conditional dropout: ' + str(self.conditional_dropout))
-            #it's a float, convert to percentage
-            if self.conditional_dropout < 1:
-                self.conditional_dropout = self.conditional_dropout * 100
-            #calculate how many images to drop
-            self.num_images_to_drop = math.trunc(self.num_train_images * (self.conditional_dropout / 100))
-            print()
-            print(f" {bcolors.WARNING} ** Conditional Dropout will drop: {self.num_images_to_drop} captions{bcolors.ENDC}")   
-            print()
-            selectedRandoms = []
-            for i in range(self.num_images_to_drop):
-                #pick a random image to drop
-                random_image = random.randint(0, len(self.image_train_items) - 1)
-                while random_image in selectedRandoms:
-                    random_image = random.randint(0, len(self.image_train_items) - 1)
-                selectedRandoms.append(random_image)
-                #remove it from the list
-                train_item = self.image_train_items[random_image]
-                #edit the train_item caption to be the word 'drop'
-                train_item.caption = ''
-                #replace the image in the list with the edited train_item
-                self.image_train_items[random_image] = train_item
-                #print('   ' +str(i))
 
-        
         print()
-        print(f" {bcolors.WARNING} ** Validation Set: {set}, steps: {self._length / batch_size:.0f}, repeats: {repeats} {bcolors.ENDC}")   
+        print(f" {bcolors.WARNING} ** Validation Set: {set}, steps: {self._length / batch_size:.0f}, repeats: {repeats} {bcolors.ENDC}")
         print()
-        
+
     
     def __len__(self):
         return self._length
@@ -625,6 +623,9 @@ class AutoBucketing(Dataset):
             image_train_tmp_caption = ", ".join(caption_parts)
             #print(image_train_tmp_caption)
             example["instance_images"] = self.image_transforms(image_train_tmp_image)
+            if self.model_variant == 'inpainting':
+                image_train_tmp_mask = Image.fromarray(self.normalize8(image_train_tmp.mask)).convert("L")
+                example["mask"] = self.mask_transforms(image_train_tmp_mask)
             example["instance_prompt_ids"] = self.tokenizer(
                 image_train_tmp_caption,
                 padding="do_not_pad",
@@ -633,7 +634,7 @@ class AutoBucketing(Dataset):
             ).input_ids
             image_train_item.self_destruct()
             return example
-            
+
         if class_img==True:
             image_train_tmp = image_train_item.hydrate(crop=False, save=4, crop_jitter=self.crop_jitter)
             image_train_tmp_image = Image.fromarray(self.normalize8(image_train_tmp.image)).convert("RGB")
@@ -651,89 +652,115 @@ _RANDOM_TRIM = 0.04
 class ImageTrainItem(): 
     """
     image: Image
+    mask: Image
     identifier: caption,
     target_aspect: (width, height), 
     pathname: path to image file
     flip_p: probability of flipping image (0.0 to 1.0)
     """    
-    def __init__(self, image: Image, caption: str, target_wh: list, pathname: str, flip_p=0.0):
+    def __init__(self, image: Image, mask: Image, caption: str, target_wh: list, pathname: str, flip_p=0.0, model_variant='base'):
         self.caption = caption
         self.target_wh = target_wh
         self.pathname = pathname
+        self.mask_pathname = os.path.splitext(pathname)[0] + "-masklabel.png"
         self.flip_p = flip_p
         self.flip = transforms.RandomHorizontalFlip(p=flip_p)
         self.cropped_img = None
+        self.model_variant = model_variant
         self.is_dupe = []
+        self.variant_warning = False
+
         if image is None:
             self.image = []
         else:
             self.image = image
+
+        if mask is None:
+            self.mask = []
+        else:
+            self.mask = mask
+
     def self_destruct(self):
         self.image = []
+        self.mask = []
         self.cropped_img = None
         self.is_dupe.append(1)
+
+    def load_image(self, pathname, crop, crop_jitter):
+        if len(self.is_dupe) > 0:
+            chance = float(len(self.is_dupe)) / 10.0
+            self.flip = transforms.RandomHorizontalFlip(p=self.flip_p + chance if chance < 1.0 else 1.0)
+            self.crop_jitter = crop_jitter + (len(self.is_dupe) * 10) if crop_jitter < 50 else 50
+        image = Image.open(pathname).convert('RGB')
+
+        width, height = image.size
+        if crop:
+            cropped_img = self.__autocrop(image)
+            image = cropped_img.resize((512, 512), resample=Image.Resampling.LANCZOS)
+        else:
+            width, height = image.size
+            jitter_amount = random.randint(0, crop_jitter)
+
+            if self.target_wh[0] == self.target_wh[1]:
+                if width > height:
+                    left = random.randint(0, width - height)
+                    image = image.crop((left, 0, height + left, height))
+                    width = height
+                elif height > width:
+                    top = random.randint(0, height - width)
+                    image = image.crop((0, top, width, width + top))
+                    height = width
+                elif width > self.target_wh[0]:
+                    slice = min(int(self.target_wh[0] * _RANDOM_TRIM), width - self.target_wh[0])
+                    slicew_ratio = random.random()
+                    left = int(slice * slicew_ratio)
+                    right = width - int(slice * (1 - slicew_ratio))
+                    sliceh_ratio = random.random()
+                    top = int(slice * sliceh_ratio)
+                    bottom = height - int(slice * (1 - sliceh_ratio))
+
+                    image = image.crop((left, top, right, bottom))
+            else:
+                image_aspect = width / height
+                target_aspect = self.target_wh[0] / self.target_wh[1]
+                if image_aspect > target_aspect:
+                    new_width = int(height * target_aspect)
+                    jitter_amount = max(min(jitter_amount, int(abs(width - new_width) / 2)), 0)
+                    left = jitter_amount
+                    right = left + new_width
+                    image = image.crop((left, 0, right, height))
+                else:
+                    new_height = int(width / target_aspect)
+                    jitter_amount = max(min(jitter_amount, int(abs(height - new_height) / 2)), 0)
+                    top = jitter_amount
+                    bottom = top + new_height
+                    image = image.crop((0, top, width, bottom))
+                    # LAZCOS resample
+            image = image.resize(self.target_wh, resample=Image.Resampling.LANCZOS)
+            # print the pixel count of the image
+            # print path to image file
+            # print(self.pathname)
+            # print(self.image.size[0] * self.image.size[1])
+            image = self.flip(image)
+        return image
+
     def hydrate(self, crop=False, save=False, crop_jitter=20):
         """
         crop: hard center crop to 512x512
         save: save the cropped image to disk, for manual inspection of resize/crop
         crop_jitter: randomly shift cropp by N pixels when using multiple aspect ratios to improve training quality
         """
+
         if not hasattr(self, 'image') or len(self.image) == 0:
-            if len(self.is_dupe) > 0:
-                chance = float(len(self.is_dupe)) / 10.0
-                self.flip = transforms.RandomHorizontalFlip(p=self.flip_p+chance if chance < 1.0 else 1.0)
-                self.crop_jitter = crop_jitter + (len(self.is_dupe) * 10) if crop_jitter < 50 else 50
-            self.image = Image.open(self.pathname).convert('RGB')
-
-            width, height = self.image.size
-            if crop: 
-                cropped_img = self.__autocrop(self.image)
-                self.image = cropped_img.resize((512,512), resample=Image.Resampling.LANCZOS)
-            else:
-                width, height = self.image.size
-                jitter_amount = random.randint(0,crop_jitter)
-
-                if self.target_wh[0] == self.target_wh[1]:
-                    if width > height:
-                        left = random.randint(0, width - height)
-                        self.image = self.image.crop((left, 0, height+left, height))
-                        width = height
-                    elif height > width:
-                        top = random.randint(0, height - width)
-                        self.image = self.image.crop((0, top, width, width+top))
-                        height = width
-                    elif width > self.target_wh[0]:
-                        slice = min(int(self.target_wh[0] * _RANDOM_TRIM), width-self.target_wh[0])
-                        slicew_ratio = random.random()
-                        left = int(slice*slicew_ratio)
-                        right = width-int(slice*(1-slicew_ratio))
-                        sliceh_ratio = random.random()
-                        top = int(slice*sliceh_ratio)
-                        bottom = height- int(slice*(1-sliceh_ratio))
-
-                        self.image = self.image.crop((left, top, right, bottom))
-                else: 
-                    image_aspect = width / height                    
-                    target_aspect = self.target_wh[0] / self.target_wh[1]
-                    if image_aspect > target_aspect:
-                        new_width = int(height * target_aspect)
-                        jitter_amount = max(min(jitter_amount, int(abs(width-new_width)/2)), 0)
-                        left = jitter_amount
-                        right = left + new_width
-                        self.image = self.image.crop((left, 0, right, height))
-                    else:
-                        new_height = int(width / target_aspect)
-                        jitter_amount = max(min(jitter_amount, int(abs(height-new_height)/2)), 0)
-                        top = jitter_amount
-                        bottom = top + new_height
-                        self.image = self.image.crop((0, top, width, bottom))
-                        #LAZCOS resample
-                self.image = self.image.resize(self.target_wh, resample=Image.Resampling.LANCZOS)
-            #print the pixel count of the image
-            #print path to image file
-            #print(self.pathname)
-            #print(self.image.size[0] * self.image.size[1])
-            self.image = self.flip(self.image)
+            self.image = self.load_image(self.pathname, crop, crop_jitter)
+            if self.model_variant == "inpainting":
+                if os.path.exists(self.mask_pathname):
+                    self.mask = self.load_image(self.mask_pathname, crop, crop_jitter)
+                else:
+                    if self.variant_warning == False:
+                        print(f" {bcolors.FAIL} ** Warning: No mask found for an image, using an empty mask but make sure you're training the right model variant.{bcolors.ENDC}")
+                        self.variant_warning = True
+                    self.mask = Image.new('RGB', self.image.size, color="white")
 
         if type(self.image) is not np.ndarray:
             if save: 
@@ -745,7 +772,12 @@ class ImageTrainItem():
             self.image = np.array(self.image).astype(np.uint8)
 
             self.image = (self.image / 127.5 - 1.0).astype(np.float32)
-        
+        if self.model_variant == "inpainting":
+            if type(self.mask) is not np.ndarray:
+                self.mask = np.array(self.mask).astype(np.uint8)
+
+                self.mask = (self.mask / 255.0).astype(np.float32)
+
         #print(self.image.shape)
 
         return self
@@ -757,7 +789,7 @@ class DataLoaderMultiAspect():
     batch_size: number of images per batch
     flip_p: probability of flipping image horizontally (i.e. 0-0.5)
     """
-    def __init__(self,concept_list, seed=555, debug_level=0,resolution=512, batch_size=1, flip_p=0.0,use_image_names_as_captions=True,add_class_images_to_dataset=False,balance_datasets=False,with_prior_loss=False,use_text_files_as_captions=False,aspect_mode='dynamic',action_preference='add'):
+    def __init__(self,concept_list, seed=555, debug_level=0,resolution=512, batch_size=1, flip_p=0.0,use_image_names_as_captions=True,add_class_images_to_dataset=False,balance_datasets=False,with_prior_loss=False,use_text_files_as_captions=False,aspect_mode='dynamic',action_preference='add',model_variant='base'):
         self.resolution = resolution
         self.debug_level = debug_level
         self.flip_p = flip_p
@@ -768,6 +800,8 @@ class DataLoaderMultiAspect():
         self.use_text_files_as_captions = use_text_files_as_captions
         self.aspect_mode = aspect_mode
         self.action_preference = action_preference
+        self.seed = seed
+        self.model_variant = model_variant
         prepared_train_data = []
         
         self.aspects = get_aspect_buckets(resolution)
@@ -818,12 +852,12 @@ class DataLoaderMultiAspect():
                 else:
                     flip_p = float(flip_p)
             self.__recurse_data_root(self=self, recurse_root=data_root,use_sub_dirs=use_sub_dirs)
-            random.Random(seed).shuffle(self.image_paths)
+            random.Random(self.seed).shuffle(self.image_paths)
             prepared_train_data.extend(self.__prescan_images(debug_level, self.image_paths, flip_p,use_image_names_as_captions,concept_prompt,use_text_files_as_captions=self.use_text_files_as_captions)[0:min_concept_num_images]) # ImageTrainItem[]
             if add_class_images_to_dataset:
                 self.image_paths = []
                 self.__recurse_data_root(self=self, recurse_root=data_root_class,use_sub_dirs=use_sub_dirs)
-                random.Random(seed).shuffle(self.image_paths)
+                random.Random(self.seed).shuffle(self.image_paths)
                 use_image_names_as_captions = False
                 prepared_train_data.extend(self.__prescan_images(debug_level, self.image_paths, flip_p,use_image_names_as_captions,concept_class_prompt,use_text_files_as_captions=self.use_text_files_as_captions)) # ImageTrainItem[]
             
@@ -865,14 +899,15 @@ class DataLoaderMultiAspect():
 
                 if os.path.exists(txt_file_path):
                     try:
-                        with open(txt_file_path, 'r',encoding='utf-8') as f:
+                        with open(txt_file_path, 'r',encoding='utf-8',errors='ignore') as f:
                             identifier = f.readline().rstrip()
                             f.close()
                             if len(identifier) < 1:
                                 raise ValueError(f" *** Could not find valid text in: {txt_file_path}")
                             
-                    except:
+                    except Exception as e:
                         print(f" {bcolors.FAIL} *** Error reading {txt_file_path} to get caption, falling back to filename{bcolors.ENDC}") 
+                        print(e)
                         identifier = caption_from_filename
                         pass
             #print("identifier: ",identifier)
@@ -882,7 +917,7 @@ class DataLoaderMultiAspect():
 
             target_wh = min(self.aspects, key=lambda aspects:abs(aspects[0]/aspects[1] - image_aspect))
 
-            image_train_item = ImageTrainItem(image=None, caption=identifier, target_wh=target_wh, pathname=pathname, flip_p=flip_p)
+            image_train_item = ImageTrainItem(image=None, mask=None, caption=identifier, target_wh=target_wh, pathname=pathname, flip_p=flip_p,model_variant='base' if self.model_variant == 'base' else 'inpainting')
 
             decorated_image_train_items.append(image_train_item)
         return decorated_image_train_items
@@ -892,7 +927,7 @@ class DataLoaderMultiAspect():
         """
         Put images into buckets based on aspect ratio with batch_size*n images per bucket, discards remainder
         """
-        
+
         # TODO: this is not terribly efficient but at least linear time
         buckets = {}
         for image_caption_pair in prepared_train_data:
@@ -900,7 +935,7 @@ class DataLoaderMultiAspect():
 
             if (target_wh[0],target_wh[1]) not in buckets:
                 buckets[(target_wh[0],target_wh[1])] = []
-            buckets[(target_wh[0],target_wh[1])].append(image_caption_pair) 
+            buckets[(target_wh[0],target_wh[1])].append(image_caption_pair)
         print(f" ** Number of buckets: {len(buckets)}")
         for bucket in buckets:
             bucket_len = len(buckets[bucket])
@@ -927,7 +962,7 @@ class DataLoaderMultiAspect():
                         action = 'truncate'
                 elif batch_size > bucket_len:
                     action = 'add'
-                
+
             elif aspect_mode == 'add':
                 action = 'add'
             elif aspect_mode == 'truncate':
@@ -941,7 +976,7 @@ class DataLoaderMultiAspect():
                 print(f"  ** Bucket {bucket} found {bucket_len}, nice!")
             elif action == 'add':
                 #copy the bucket
-                shuffleBucket = random.sample(buckets[bucket], bucket_len)     
+                shuffleBucket = random.sample(buckets[bucket], bucket_len)
                 #add the images to the bucket
                 current_bucket_size = bucket_len
                 truncate_count = (bucket_len) % batch_size
@@ -954,21 +989,21 @@ class DataLoaderMultiAspect():
                         #print(str(randomIndex))
                         buckets[bucket].append(shuffleBucket[randomIndex])
                         added+=1
-                    print(f"  ** Bucket {bucket} found {bucket_len} images, will duplicate {added} images due to batch size {batch_size}")
+                    print(f"  ** Bucket {bucket} found {bucket_len} images, will {bcolors.OKCYAN}duplicate {added} images{bcolors.ENDC} due to batch size {bcolors.WARNING}{batch_size}{bcolors.ENDC}")
                 else:
-                    print(f"  ** Bucket {bucket} found {bucket_len}, nice!")
+                    print(f"  ** Bucket {bucket} found {bucket_len}, {bcolors.OKGREEN}nice!{bcolors.ENDC}")
             elif action == 'truncate':
                 truncate_count = (bucket_len) % batch_size
                 current_bucket_size = bucket_len
                 buckets[bucket] = buckets[bucket][:current_bucket_size - truncate_count]
-                print(f"  ** Bucket {bucket} found {bucket_len} images, will drop {truncate_count} images due to batch size {batch_size}")
+                print(f"  ** Bucket {bucket} found {bucket_len} images, will {bcolors.FAIL}drop {truncate_count} images{bcolors.ENDC} due to batch size {bcolors.WARNING}{batch_size}{bcolors.ENDC}")
             
 
         # flatten the buckets
         image_caption_pairs = []
         for bucket in buckets:
             image_caption_pairs.extend(buckets[bucket])
-        
+
         return image_caption_pairs
 
     @staticmethod
@@ -978,7 +1013,7 @@ class DataLoaderMultiAspect():
             current = os.path.join(recurse_root, f)
             if os.path.isfile(current):
                 ext = os.path.splitext(f)[1].lower()
-                if ext in ['.jpg', '.jpeg', '.png', '.bmp', '.webp']:
+                if ext in ['.jpg', '.jpeg', '.png', '.bmp', '.webp'] and '-masklabel.png' not in f:
                     #try to open the file to make sure it's a valid image
                     try:
                         img = Image.open(current)
@@ -1003,7 +1038,7 @@ class DataLoaderMultiAspect():
             for dir in sub_dirs:
                 self.__recurse_data_root(self=self, recurse_root=dir)
 
-class DreamBoothDataset(Dataset):
+class NormalDataset(Dataset):
     """
     A dataset to prepare the instance and class images with the prompts for fine-tuning the model.
     It pre-processes the images and the tokenizes prompts.
@@ -1020,7 +1055,8 @@ class DreamBoothDataset(Dataset):
         use_image_names_as_captions=False,
         repeats=1,
         use_text_files_as_captions=False,
-        conditional_dropout=None,
+        seed=555,
+        model_variant='base'
     ):
         self.use_image_names_as_captions = use_image_names_as_captions
         self.size = size
@@ -1030,8 +1066,9 @@ class DreamBoothDataset(Dataset):
         self.use_text_files_as_captions = use_text_files_as_captions
         self.image_paths = []
         self.class_images_path = []
-        self.conditional_dropout = conditional_dropout
-
+        self.seed = seed
+        self.model_variant = model_variant
+        self.variant_warning = False
         for concept in concepts_list:
             if 'use_sub_dirs' in concept:
                 if concept['use_sub_dirs'] == True:
@@ -1047,31 +1084,7 @@ class DreamBoothDataset(Dataset):
             if with_prior_preservation:
                 for i in range(repeats):
                     self.__recurse_data_root(self, concept,use_sub_dirs=False,class_images=True)
-        random.shuffle(self.image_paths)
-        if self.conditional_dropout != None:
-            #print('conditional dropout: ' + str(self.conditional_dropout))
-            #it's a float, convert to percentage
-            if self.conditional_dropout < 1:
-                self.conditional_dropout = self.conditional_dropout * 100
-            #calculate how many images to drop
-            self.num_images_to_drop = math.trunc(len(self.image_paths) * (self.conditional_dropout / 100))
-            print()
-            print(f" {bcolors.WARNING} ** Conditional Dropout will drop: {self.num_images_to_drop} captions{bcolors.ENDC}") 
-            print()
-            selectedRandoms = []
-            for i in range(self.num_images_to_drop):
-                #pick a random image to drop
-                random_image = random.randint(0, len(self.image_paths) - 1)
-                while random_image in selectedRandoms:
-                    random_image = random.randint(0, len(self.image_paths) - 1)
-                selectedRandoms.append(random_image)
-                #remove it from the list
-                train_item = self.image_paths[random_image]
-                #edit the train_item caption to be the word 'drop'
-                train_item[1] = ''
-                #replace the image in the list with the edited train_item
-                self.image_paths[random_image] = train_item
-                #print('   ' +str(i))
+        random.Random(seed).shuffle(self.image_paths)
         self.num_instance_images = len(self.image_paths)
         self._length = self.num_instance_images
         self.num_class_images = len(self.class_images_path)
@@ -1085,17 +1098,28 @@ class DreamBoothDataset(Dataset):
                 transforms.ToTensor(),
                 transforms.Normalize([0.5], [0.5]),
             ]
+            
         )
+        self.mask_transforms = transforms.Compose(
+            [
+                transforms.Resize(size, interpolation=transforms.InterpolationMode.BILINEAR),
+                transforms.CenterCrop(size) if center_crop else transforms.RandomCrop(size),
+                transforms.ToTensor(),
+            ])
     @staticmethod
     def __recurse_data_root(self, recurse_root,use_sub_dirs=True,class_images=False):
         #if recurse root is a dict
         if isinstance(recurse_root, dict):
-            concept_token = recurse_root['instance_prompt']
-            data = recurse_root['instance_data_dir']
-            
-            if class_images:
+            if class_images == True:
+                #print(f" {bcolors.WARNING} ** Processing class images: {recurse_root['class_data_dir']}{bcolors.ENDC}")
                 concept_token = recurse_root['class_prompt']
                 data = recurse_root['class_data_dir']
+            else:
+                #print(f" {bcolors.WARNING} ** Processing instance images: {recurse_root['instance_data_dir']}{bcolors.ENDC}")
+                concept_token = recurse_root['instance_prompt']
+                data = recurse_root['instance_data_dir']
+
+
         else:
             concept_token = None
         #progress bar
@@ -1127,7 +1151,7 @@ class DreamBoothDataset(Dataset):
                     sub_dirs.append(current)
 
             for dir in sub_dirs:
-                if class_images != False:
+                if class_images == False:
                     self.__recurse_data_root(self=self, recurse_root={'instance_data_dir' : dir, 'instance_prompt' : concept_token})
                 else:
                     self.__recurse_data_root(self=self, recurse_root={'class_data_dir' : dir, 'class_prompt' : concept_token})
@@ -1140,6 +1164,18 @@ class DreamBoothDataset(Dataset):
         instance_path, instance_prompt = self.image_paths[index % self.num_instance_images]
         og_prompt = instance_prompt
         instance_image = Image.open(instance_path)
+        if self.model_variant == "inpainting":
+            mask_pathname = os.path.splitext(instance_path)[0] + "-masklabel.png"
+            if os.path.exists(mask_pathname):
+                mask = Image.open(mask_pathname).convert("L")
+            else:
+                if self.variant_warning == False:
+                    print(f" {bcolors.FAIL} ** Warning: No mask found for an image, using an empty mask but make sure you're training the right model variant.{bcolors.ENDC}")
+                    self.variant_warning = True
+                size = instance_image.size
+                mask = Image.new('RGB', size, color="white").convert("L")
+            example["mask"] = self.mask_transforms(mask)
+
         if self.use_image_names_as_captions == True:
             instance_prompt = str(instance_path).split(os.sep)[-1].split('.')[0].split('_')[0]
         #else if there's a txt file with the same name as the image, read the caption from there
@@ -1155,9 +1191,6 @@ class DreamBoothDataset(Dataset):
                 with open(txt_path, encoding='utf-8') as f:
                     instance_prompt = f.readline().rstrip()
                     f.close()
-        if self.conditional_dropout != None:
-            if og_prompt == '' and instance_prompt != '':
-                instance_prompt = ''
                 
             
         #print('identifier: ' + instance_prompt)
@@ -1203,33 +1236,74 @@ class PromptDataset(Dataset):
 
 class CachedLatentsDataset(Dataset):
     #stores paths and loads latents on the fly
-    def __init__(self, cache_paths=()):
+    def __init__(self, cache_paths=(),batch_size=None,tokenizer=None,conditional_dropout=None,accelerator=None,dtype=None,model_variant='base'):
         self.cache_paths = cache_paths
+        self.tokenizer = tokenizer
+        self.empty_batch = [self.tokenizer('',padding="do_not_pad",truncation=True,max_length=self.tokenizer.model_max_length,).input_ids for i in range(batch_size)]
+        self.empty_tokens = tokenizer.pad({"input_ids": self.empty_batch},padding="max_length",max_length=tokenizer.model_max_length,return_tensors="pt",).input_ids
+        self.empty_tokens.to(accelerator.device, dtype=dtype)
+        self.conditional_dropout = conditional_dropout
+        self.conditional_indexes = []
+        self.model_variant = model_variant
     def __len__(self):
         return len(self.cache_paths)
     def __getitem__(self, index):
+        if index == 0:
+            possible_indexes = list(range(0,len(self.cache_paths)-1))
+            #conditional dropout is a percentage of images to drop from the total cache_paths
+            if self.conditional_dropout != None:
+                if self.conditional_indexes == []:
+                    print(f" {bcolors.WARNING}Conditional dropout will drop {int(math.ceil(len(self.cache_paths) * self.conditional_dropout))} random batch's captions per epoch{bcolors.ENDC}")
+                    while len(self.conditional_indexes) < math.ceil(len(self.cache_paths) * self.conditional_dropout):
+                        picked_index = random.choice(possible_indexes)
+                        self.conditional_indexes.append(picked_index)
+                        possible_indexes.remove(picked_index)
+                else:
+                    past_indexes = self.conditional_indexes
+                    self.conditional_indexes = []
+                    #pick new indexes, but don't pick the same ones twice
+                    while len(self.conditional_indexes) < math.ceil(len(self.cache_paths) * self.conditional_dropout):
+                        picked_index = random.choice(possible_indexes)
+                        if picked_index in past_indexes:
+                            continue
+                        self.conditional_indexes.append(picked_index)
+                        possible_indexes.remove(picked_index)
+
         self.cache = torch.load(self.cache_paths[index])
         self.latents = self.cache.latents_cache[0]
-        self.text_encoder = self.cache.text_encoder_cache[0]
-        del self.cache
-        return self.latents, self.text_encoder
+        if index in self.conditional_indexes:
+            self.text_encoder = self.empty_tokens
+        else:
+            self.text_encoder = self.cache.text_encoder_cache[0]
+        if self.model_variant == 'inpainting':
+            self.conditioning_latent_cache = self.cache.conditioning_latent_cache[0]
+            self.mask_cache = self.cache.mask_cache[0]
+            del self.cache
+            return self.latents, self.text_encoder, self.conditioning_latent_cache, self.mask_cache
+        elif self.model_variant == 'base':
+            del self.cache
+            return self.latents, self.text_encoder
     def add_pt_cache(self, cache_path):
-        self.cache_paths += (cache_path,)
+        if len(self.cache_paths) == 0:
+            self.cache_paths = (cache_path,)
+        else:
+            self.cache_paths += (cache_path,)
+
 class LatentsDataset(Dataset):
-    def __init__(self, latents_cache=None, text_encoder_cache=None):
+    def __init__(self, latents_cache=None, text_encoder_cache=None, conditioning_latent_cache=None, mask_cache=None):
         self.latents_cache = latents_cache
         self.text_encoder_cache = text_encoder_cache
-    def add_latent(self, latent, text_encoder):
+        self.conditioning_latent_cache = conditioning_latent_cache
+        self.mask_cache = mask_cache
+    def add_latent(self, latent, text_encoder, cached_conditioning_latent, cached_mask):
         self.latents_cache.append(latent)
         self.text_encoder_cache.append(text_encoder)
+        self.conditioning_latent_cache.append(cached_conditioning_latent)
+        self.mask_cache.append(cached_mask)
     def __len__(self):
         return len(self.latents_cache)
     def __getitem__(self, index):
-        return self.latents_cache[index], self.text_encoder_cache[index]
-    def __add__(self, other):
-        latents_cache = self.latents_cache + other.latents_cache
-        text_encoder_cache = self.text_encoder_cache + other.text_encoder_cache
-        return LatentsDataset(latents_cache, text_encoder_cache)
+        return self.latents_cache[index], self.text_encoder_cache[index], self.conditioning_latent_cache[index], self.mask_cache[index]
 class AverageMeter:
     def __init__(self, name=None):
         self.name = name
@@ -1429,7 +1503,7 @@ def main():
     if is_xformers_available():
         try:
             unet.enable_xformers_memory_efficient_attention()
-            #vae.enable_xformers_memory_efficient_attention()
+            vae.enable_xformers_memory_efficient_attention()
         except Exception as e:
             logger.warning(
                 "Could not enable memory efficient attention. Make sure xformers is installed"
@@ -1438,7 +1512,7 @@ def main():
     if args.use_ema == True:
         ema_unet = EMAModel(unet.parameters())
     vae.requires_grad_(False)
-    #vae.enable_slicing()
+    vae.enable_slicing()
     if not args.train_text_encoder:
         text_encoder.requires_grad_(False)
 
@@ -1485,18 +1559,6 @@ def main():
     )
     noise_scheduler = DDPMScheduler.from_config(args.pretrained_model_name_or_path, subfolder="scheduler")
 
-    #noise_scheduler = EulerDiscreteScheduler.from_pretrained(args.pretrained_model_name_or_path, subfolder="scheduler", prediction_type="v_prediction")
-    '''
-    train_dataset = DreamBoothDataset(
-        concepts_list=args.concepts_list,
-        tokenizer=tokenizer,
-        with_prior_preservation=args.with_prior_preservation,
-        size=args.resolution,
-        center_crop=args.center_crop,
-        num_class_images=args.num_class_images,
-        use_image_names_as_captions=args.use_image_names_as_captions,
-    )
-    '''
     if args.use_bucketing:
         train_dataset = AutoBucketing(
             concepts_list=args.concepts_list,
@@ -1509,12 +1571,13 @@ def main():
             with_prior_loss=False,#args.with_prior_preservation,
             repeats=args.dataset_repeats,
             use_text_files_as_captions=args.use_text_files_as_captions,
-            conditional_dropout=args.conditional_dropout,
             aspect_mode=args.aspect_mode,
             action_preference=args.aspect_mode_action_preference,
+            seed = args.seed,
+            model_variant=args.model_variant,
         )
     else:
-        train_dataset = DreamBoothDataset(
+        train_dataset = NormalDataset(
         concepts_list=args.concepts_list,
         tokenizer=tokenizer,
         with_prior_preservation=args.with_prior_preservation,
@@ -1524,19 +1587,24 @@ def main():
         use_image_names_as_captions=args.use_image_names_as_captions,
         repeats=args.dataset_repeats,
         use_text_files_as_captions=args.use_text_files_as_captions,
-        conditional_dropout=args.conditional_dropout
+        seed = args.seed,
+        model_variant=args.model_variant,
     )
     def collate_fn(examples):
         #print(examples)
         #print('test')
         input_ids = [example["instance_prompt_ids"] for example in examples]
         pixel_values = [example["instance_images"] for example in examples]
+        if args.model_variant == 'inpainting':
+            mask = [example["mask"] for example in examples]
         #print('test')
         # Concat class and instance examples for prior preservation.
         # We do this to avoid doing two forward passes.
         if args.with_prior_preservation:
             input_ids += [example["class_prompt_ids"] for example in examples]
             pixel_values += [example["class_images"] for example in examples]
+            if args.model_variant == 'inpainting':
+                mask += [example["mask"] for example in examples]
         ### no need to do it now when it's loaded by the multiAspectsDataset
         #if args.with_prior_preservation:
         #    input_ids += [example["class_prompt_ids"] for example in examples]
@@ -1548,18 +1616,25 @@ def main():
 
         pixel_values = torch.stack(pixel_values)
         pixel_values = pixel_values.to(memory_format=torch.contiguous_format).float()
-        
+
         input_ids = tokenizer.pad(
             {"input_ids": input_ids},
             padding="max_length",
             max_length=tokenizer.model_max_length,
             return_tensors="pt",\
             ).input_ids
-            
-        batch = {
-            "input_ids": input_ids,
-            "pixel_values": pixel_values,
-        }
+        if args.model_variant == 'inpainting':
+            mask = torch.stack(mask)
+            batch = {
+                "input_ids": input_ids,
+                "pixel_values": pixel_values,
+                "mask": mask,
+            }
+        if args.model_variant == 'base':
+            batch = {
+                "input_ids": input_ids,
+                "pixel_values": pixel_values,
+            }
         return batch
 
     train_dataloader = torch.utils.data.DataLoader(
@@ -1567,7 +1642,6 @@ def main():
     )
     #get the length of the dataset
     train_dataset_length = len(train_dataset)
-
     #code to check if latent cache needs to be resaved
     #check if last_run.json file exists in logging_dir
     if os.path.exists(logging_dir / "last_run.json"):
@@ -1611,86 +1685,90 @@ def main():
     if not args.train_text_encoder:
         text_encoder.to(accelerator.device, dtype=weight_dtype)
 
-    if not args.not_cache_latents:
-        cached_dataset = CachedLatentsDataset()
-        gen_cache = False
-        data_len = len(train_dataloader)
-        latent_cache_dir = Path(args.output_dir, "logs", "latent_cache")
-        #check if latents_cache.pt exists in the output_dir
-        if not os.path.exists(latent_cache_dir):
-            os.makedirs(latent_cache_dir)
-        for i in range(0,data_len-1):
-            if not os.path.exists(os.path.join(latent_cache_dir, f"latents_cache_{i}.pt")) or args.regenerate_latent_cache == True or args.save_latents_cache == False:
-                gen_cache = True
-                
-        if gen_cache == False :
-            print(f" {bcolors.OKGREEN}Loading Latent Cache from {latent_cache_dir}{bcolors.ENDC}")
-            del vae
-            if not args.train_text_encoder:
-                del text_encoder
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
-            #load all the cached latents into a single dataset
-            train_dataset = LatentsDataset([], [])
-            for i in range(0,data_len-1):
-                cached_dataset.add_pt_cache(os.path.join(latent_cache_dir,f"latents_cache_{i}.pt"))
-                #train_dataset += torch.load(os.path.join(latent_cache_dir,f"latents_cache_{i}.pt"))
-                if not args.save_latents_cache:
-                    os.remove(os.path.join(latent_cache_dir,f"latents_cache_{i}.pt"))
-        if gen_cache == True:
-            #delete all the cached latents if they exist to avoid problems
-            if args.regenerate_latent_cache:
-                files = os.listdir(latent_cache_dir)
-                for file in files:
-                    os.remove(os.path.join(latent_cache_dir,file))
-            print(f" {bcolors.WARNING}Generating latents cache...{bcolors.ENDC}") 
-            train_dataset = LatentsDataset([], [])
-            counter = 0
-            with torch.no_grad():
-                for batch in tqdm(train_dataloader, desc="Caching latents", bar_format='%s{l_bar}%s%s{bar}%s%s{r_bar}%s'%(bcolors.OKBLUE,bcolors.ENDC, bcolors.OKBLUE, bcolors.ENDC,bcolors.OKBLUE,bcolors.ENDC,)):
-                    batch["pixel_values"] = batch["pixel_values"].to(accelerator.device, non_blocking=True, dtype=weight_dtype)
-                    batch["input_ids"] = batch["input_ids"].to(accelerator.device, non_blocking=True)
-                    
-                    cached_latent = vae.encode(batch["pixel_values"]).latent_dist
-                    if args.train_text_encoder:
-                        cached_text_enc = batch["input_ids"]
-                    else:
-                        cached_text_enc = text_encoder(batch["input_ids"])[0]
-                    train_dataset.add_latent(cached_latent, cached_text_enc)
-                    del batch
-                    del cached_latent
-                    del cached_text_enc
-                    torch.save(train_dataset, os.path.join(latent_cache_dir,f"latents_cache_{counter}.pt"))
-                    cached_dataset.add_pt_cache(os.path.join(latent_cache_dir,f"latents_cache_{counter}.pt"))
-                    counter += 1
-                    train_dataset = LatentsDataset([], [])
-                    #if counter % 300 == 0:
-                        #train_dataloader = torch.utils.data.DataLoader(train_dataset, batch_size=1, collate_fn=lambda x: x, shuffle=False)
-                    #    gc.collect()
-                    #    torch.cuda.empty_cache()
-                    #    accelerator.free_memory()
-                        
-            #clear vram after caching latents
-            del vae
-            if not args.train_text_encoder:
-                del text_encoder
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
-            #load all the cached latents into a single dataset
-            #train_dataset = LatentsDataset([], [])
-            for i in range(0,counter):
-                #train_dataset += torch.load(os.path.join(latent_cache_dir,f"latents_cache_{i}.pt"))
-                cached_dataset.add_pt_cache(os.path.join(latent_cache_dir,f"latents_cache_{i}.pt"))
-                if not args.save_latents_cache:
-                    os.remove(os.path.join(latent_cache_dir,f"latents_cache_{i}.pt"))
-            if not args.save_latents_cache:
-                #remove all the cached latents
-                for i in range(0,counter):
-                    if os.path.exists(os.path.join(latent_cache_dir, f"latents_cache_{i}.pt")):
-                        os.remove(os.path.join(latent_cache_dir,f"latents_cache_{i}.pt"))
-        train_dataloader = torch.utils.data.DataLoader(cached_dataset, batch_size=1, collate_fn=lambda x: x, shuffle=False)
-    if torch.cuda.is_available():
+    if args.model_variant == 'inpainting':
+        if args.use_bucketing:
+            wh = set([tuple(x.target_wh) for x in train_dataset.image_train_items])
+        else:
+            wh = set([tuple([args.resolution, args.resolution]) for x in train_dataset.image_paths])
+        mask_latent = {shape: vae.encode(torch.zeros(1, 3, shape[1], shape[0]).to(accelerator.device, dtype=weight_dtype)).latent_dist.mean * 0.18215 for shape in wh}
+
+    cached_dataset = CachedLatentsDataset(batch_size=args.train_batch_size,
+    tokenizer=tokenizer,
+    conditional_dropout=args.conditional_dropout,
+    accelerator=accelerator,dtype=weight_dtype,
+    model_variant=args.model_variant)
+
+    gen_cache = False
+    data_len = len(train_dataloader)
+    latent_cache_dir = Path(args.output_dir, "logs", "latent_cache")
+    #check if latents_cache.pt exists in the output_dir
+    if not os.path.exists(latent_cache_dir):
+        os.makedirs(latent_cache_dir)
+    for i in range(0,data_len-1):
+        if not os.path.exists(os.path.join(latent_cache_dir, f"latents_cache_{i}.pt")):
+            gen_cache = True
+            break
+    if args.regenerate_latent_cache == True:
+            files = os.listdir(latent_cache_dir)
+            gen_cache = True
+            for file in files:
+                os.remove(os.path.join(latent_cache_dir,file))
+    if gen_cache == False :
+        print(f" {bcolors.OKGREEN}Loading Latent Cache from {latent_cache_dir}{bcolors.ENDC}")
+        del vae
+        if not args.train_text_encoder:
+            del text_encoder
+        if torch.cuda.is_available():
             torch.cuda.empty_cache()
+        #load all the cached latents into a single dataset
+        for i in range(0,data_len-1):
+            cached_dataset.add_pt_cache(os.path.join(latent_cache_dir,f"latents_cache_{i}.pt"))
+    if gen_cache == True:
+        #delete all the cached latents if they exist to avoid problems
+        print(f" {bcolors.WARNING}Generating latents cache...{bcolors.ENDC}")
+        train_dataset = LatentsDataset([], [], [], [])
+        counter = 0
+        with torch.no_grad():
+            for batch in tqdm(train_dataloader, desc="Caching latents", bar_format='%s{l_bar}%s%s{bar}%s%s{r_bar}%s'%(bcolors.OKBLUE,bcolors.ENDC, bcolors.OKBLUE, bcolors.ENDC,bcolors.OKBLUE,bcolors.ENDC,)):
+                cached_conditioning_latent = None
+                cached_mask = None
+                batch["pixel_values"] = batch["pixel_values"].to(accelerator.device, non_blocking=True, dtype=weight_dtype)
+                batch["input_ids"] = batch["input_ids"].to(accelerator.device, non_blocking=True)
+                if args.model_variant == "inpainting":
+                    batch["mask"] = batch["mask"].to(accelerator.device, non_blocking=True, dtype=weight_dtype)
+                    cached_conditioning_latent = vae.encode(batch["pixel_values"] * (1 - batch["mask"])).latent_dist
+                    cached_mask = functional.resize(batch["mask"], size=cached_conditioning_latent.mean.shape[2:])
+                
+                cached_latent = vae.encode(batch["pixel_values"]).latent_dist
+                if args.train_text_encoder:
+                    cached_text_enc = batch["input_ids"]
+                else:
+                    cached_text_enc = text_encoder(batch["input_ids"])[0]
+                
+                train_dataset.add_latent(cached_latent, cached_text_enc, cached_conditioning_latent, cached_mask)
+                del batch
+                del cached_latent
+                del cached_text_enc
+                del cached_conditioning_latent
+                del cached_mask
+                torch.save(train_dataset, os.path.join(latent_cache_dir,f"latents_cache_{counter}.pt"))
+                cached_dataset.add_pt_cache(os.path.join(latent_cache_dir,f"latents_cache_{counter}.pt"))
+                counter += 1
+                train_dataset = LatentsDataset([], [], [], [])
+                #if counter % 300 == 0:
+                    #train_dataloader = torch.utils.data.DataLoader(train_dataset, batch_size=1, collate_fn=lambda x: x, shuffle=False)
+                #    gc.collect()
+                #    torch.cuda.empty_cache()
+                #    accelerator.free_memory()
+
+        #clear vram after caching latents
+        del vae
+        if not args.train_text_encoder:
+            del text_encoder
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        #load all the cached latents into a single dataset
+    train_dataloader = torch.utils.data.DataLoader(cached_dataset, batch_size=1, collate_fn=lambda x: x, shuffle=False)
     print(f" {bcolors.OKGREEN}Latents are ready.{bcolors.ENDC}")
     # Scheduler and math around the number of training steps.
     overrode_max_train_steps = False
@@ -1727,7 +1805,9 @@ def main():
     num_update_steps_per_epoch = math.ceil(len(train_dataloader) / args.gradient_accumulation_steps)
     if overrode_max_train_steps:
         args.max_train_steps = args.num_train_epochs * num_update_steps_per_epoch * args.gradient_accumulation_steps
+        #print(args.max_train_steps, num_update_steps_per_epoch)
     # Afterwards we recalculate our number of training epochs
+    #print(args.max_train_steps, num_update_steps_per_epoch)
     args.num_train_epochs = math.ceil(args.max_train_steps / num_update_steps_per_epoch)
 
     # We need to initialize the trackers we use, and also store our configuration.
@@ -1786,8 +1866,10 @@ def main():
         def inference(prompt, negative_prompt, num_samples, height=512, width=512, num_inference_steps=50,seed=-1,guidance_scale=7.5):
             with torch.autocast("cuda"), torch.inference_mode():
                 if seed != -1:
-                    g_cuda = torch.Generator(device='cuda')
-                    g_cuda.manual_seed(int(seed))
+                    if g_cuda is None:
+                        g_cuda = torch.Generator(device='cuda')
+                    else:
+                        g_cuda.manual_seed(int(seed))
                 else:
                     seed = random.randint(0, 100000)
                     g_cuda = torch.Generator(device='cuda')
@@ -1829,6 +1911,16 @@ def main():
         del unwrapped_unet
         del pipeline
         return
+    def print_instructions():
+            print(f"{bcolors.WARNING}Use 'CTRL+SHIFT+G' to open up a GUI to play around with the model (will pause training){bcolors.ENDC}")
+            print(f"{bcolors.WARNING}Use 'CTRL+SHIFT+S' to save a checkpoint of the current epoch{bcolors.ENDC}")
+            print(f"{bcolors.WARNING}Use 'CTRL+SHIFT+P' to generate samples for current epoch{bcolors.ENDC}")
+            print(f"{bcolors.WARNING}Use 'CTRL+SHIFT+Q' to save and quit after the current epoch{bcolors.ENDC}")
+            print(f"{bcolors.WARNING}Use 'CTRL+SHIFT+ALT+S' to save a checkpoint of the current step{bcolors.ENDC}")
+            print(f"{bcolors.WARNING}Use 'CTRL+SHIFT+ALT+P' to generate samples for current step{bcolors.ENDC}")
+            print(f"{bcolors.WARNING}Use 'CTRL+SHIFT+ALT+Q' to save and quit after the current step{bcolors.ENDC}")
+            print('')
+            print(f"{bcolors.WARNING}Use 'CTRL+H' to print this message again.{bcolors.ENDC}")
     def save_and_sample_weights(step,context='checkpoint',save_model=True):
         #check how many folders are in the output dir
         #if there are more than 5, delete the oldest one
@@ -1861,7 +1953,7 @@ def main():
                     shutil.rmtree(oldest_folder_path)
         # Create the pipeline using using the trained modules and save it.
         if accelerator.is_main_process:
-            if context =='step':
+            if 'step' in context:
                 #what is the current epoch
                 epoch = step // num_update_steps_per_epoch
             else:
@@ -1939,15 +2031,24 @@ def main():
                         #convert sampleIndex to number in words
                         sampleName = f"prompt_{sampleIndex+1}"
                         os.makedirs(os.path.join(sample_dir,sampleName), exist_ok=True)
+                        if args.model_variant == 'inpainting':
+                            conditioning_image = torch.zeros(1, 3, width, height)
+                            mask = torch.ones(1, 1, width, height)
                         for i in tqdm(range(args.n_save_sample) if not args.save_sample_controlled_seed else range(args.n_save_sample+len(args.save_sample_controlled_seed)), desc="Generating samples"):
                             #check if the sample is controlled by a seed
                             if i != args.n_save_sample:
-                                images = pipeline(samplePrompt,height=height,width=width, guidance_scale=args.save_guidance_scale, num_inference_steps=args.save_infer_steps).images
+                                if args.model_variant == 'inpainting':
+                                    images = pipeline(samplePrompt, conditioning_image, mask, height=height,width=width, guidance_scale=args.save_guidance_scale, num_inference_steps=args.save_infer_steps).images
+                                elif args.model_variant == 'base':
+                                    images = pipeline(samplePrompt,height=height,width=width, guidance_scale=args.save_guidance_scale, num_inference_steps=args.save_infer_steps).images
                                 images[0].save(os.path.join(sample_dir,sampleName, f"{sampleName}_{i}.png"))
                             else:
                                 for seed in args.save_sample_controlled_seed:
                                     generator = torch.Generator("cuda").manual_seed(seed)
-                                    images = pipeline(samplePrompt,height=height,width=width, guidance_scale=args.save_guidance_scale, num_inference_steps=args.save_infer_steps, generator=generator).images
+                                    if args.model_variant == 'inpainting':
+                                        images = pipeline(samplePrompt,conditioning_image, mask,height=height,width=width, guidance_scale=args.save_guidance_scale, num_inference_steps=args.save_infer_steps, generator=generator).images
+                                    elif args.model_variant == 'base':
+                                        images = pipeline(samplePrompt,height=height,width=width, guidance_scale=args.save_guidance_scale, num_inference_steps=args.save_infer_steps, generator=generator).images
                                     images[0].save(os.path.join(sample_dir,sampleName, f"{sampleName}_controlled_seed_{str(seed)}.png"))
                         if args.send_telegram_updates:
                             imgs = []
@@ -1967,17 +2068,18 @@ def main():
                 if torch.cuda.is_available():
                     torch.cuda.empty_cache()
             if save_model == True:
-                print(f" {bcolors.OKGREEN}[*] Weights saved to {save_dir}{bcolors.ENDC}")
+                print(f"{bcolors.OKGREEN}Weights saved to {save_dir}{bcolors.ENDC}")
             elif save_model == False and len(imgs) > 0:
                 del imgs
-                print(f" {bcolors.OKGREEN}[*] Samples saved to {sample_dir}{bcolors.ENDC}")
+                print(f"{bcolors.OKGREEN}Samples saved to {sample_dir}{bcolors.ENDC}")
 
     # Only show the progress bar once on each machine.
+    progress_bar_inter_epoch = tqdm(range(num_update_steps_per_epoch),bar_format='%s{l_bar}%s%s{bar}%s%s{r_bar}%s'%(bcolors.OKBLUE,bcolors.ENDC, bcolors.OKGREEN, bcolors.ENDC,bcolors.OKBLUE,bcolors.ENDC,), disable=not accelerator.is_local_main_process)
     progress_bar = tqdm(range(args.max_train_steps),bar_format='%s{l_bar}%s%s{bar}%s%s{r_bar}%s'%(bcolors.OKBLUE,bcolors.ENDC, bcolors.OKBLUE, bcolors.ENDC,bcolors.OKBLUE,bcolors.ENDC,), disable=not accelerator.is_local_main_process)
     progress_bar_e = tqdm(range(args.num_train_epochs),bar_format='%s{l_bar}%s%s{bar}%s%s{r_bar}%s'%(bcolors.OKBLUE,bcolors.ENDC, bcolors.OKGREEN, bcolors.ENDC,bcolors.OKBLUE,bcolors.ENDC,), disable=not accelerator.is_local_main_process)
 
-    progress_bar.set_description("Steps")
-    progress_bar_e.set_description("Epochs")
+    progress_bar.set_description("Overall Steps")
+    progress_bar_e.set_description("Overall Epochs")
     global_step = 0
     loss_avg = AverageMeter()
     text_enc_context = nullcontext() if args.train_text_encoder else torch.no_grad()
@@ -1993,34 +2095,95 @@ def main():
                 if keyboard.is_pressed("ctrl") and keyboard.is_pressed("shift") and keyboard.is_pressed("g"):
                     print(f" {bcolors.WARNING}GUI will boot as soon as the current step is done.{bcolors.ENDC}")
                     nonlocal mid_generation
-                    mid_generation = True
+                    if mid_generation == True:
+                        mid_generation = False
+                        print(f" {bcolors.WARNING}Cancelled GUI.{bcolors.ENDC}")
+                    else:
+                        mid_generation = True
 
             def toggle_checkpoint(event=None):
-                if keyboard.is_pressed("ctrl") and keyboard.is_pressed("shift") and keyboard.is_pressed("s"):
+                if keyboard.is_pressed("ctrl") and keyboard.is_pressed("shift") and keyboard.is_pressed("s") and not keyboard.is_pressed("alt"):
                     print(f" {bcolors.WARNING}Saving the model as soon as this epoch is done.{bcolors.ENDC}")
                     nonlocal mid_checkpoint
-                    mid_checkpoint = True
+                    if mid_checkpoint == True:
+                        mid_checkpoint = False
+                        print(f" {bcolors.WARNING}Cancelled Checkpointing.{bcolors.ENDC}")
+                    else:
+                        mid_checkpoint = True
 
             def toggle_sample(event=None):
-                if keyboard.is_pressed("ctrl") and keyboard.is_pressed("shift") and keyboard.is_pressed("p"):
+                if keyboard.is_pressed("ctrl") and keyboard.is_pressed("shift") and keyboard.is_pressed("p") and not keyboard.is_pressed("alt"):
                     print(f" {bcolors.WARNING}Sampling will begin as soon as this epoch is done.{bcolors.ENDC}")
                     nonlocal mid_sample
-                    mid_sample = True
+                    if mid_sample == True:
+                        mid_sample = False
+                        print(f" {bcolors.WARNING}Cancelled Sampling.{bcolors.ENDC}")
+                    else:
+                        mid_sample = True
+            def toggle_checkpoint_step(event=None):
+                if keyboard.is_pressed("ctrl") and keyboard.is_pressed("shift") and keyboard.is_pressed("alt") and keyboard.is_pressed("s"):
+                    print(f" {bcolors.WARNING}Saving the model as soon as this step is done.{bcolors.ENDC}")
+                    nonlocal mid_checkpoint_step
+                    if mid_checkpoint_step == True:
+                        mid_checkpoint_step = False
+                        print(f" {bcolors.WARNING}Cancelled Checkpointing.{bcolors.ENDC}")
+                    else:
+                        mid_checkpoint_step = True
+
+            def toggle_sample_step(event=None):
+                if keyboard.is_pressed("ctrl") and keyboard.is_pressed("shift") and keyboard.is_pressed("alt") and keyboard.is_pressed("p"):
+                    print(f" {bcolors.WARNING}Sampling will begin as soon as this step is done.{bcolors.ENDC}")
+                    nonlocal mid_sample_step
+                    if mid_sample_step == True:
+                        mid_sample_step = False
+                        print(f" {bcolors.WARNING}Cancelled Sampling.{bcolors.ENDC}")
+                    else:
+                        mid_sample_step = True
+            def toggle_quit_and_save_epoch(event=None):
+                if keyboard.is_pressed("ctrl") and keyboard.is_pressed("shift") and keyboard.is_pressed("q") and not keyboard.is_pressed("alt"):
+                    print(f" {bcolors.WARNING}Quitting and saving the model as soon as this epoch is done.{bcolors.ENDC}")
+                    nonlocal mid_quit
+                    if mid_quit == True:
+                        mid_quit = False
+                        print(f" {bcolors.WARNING}Cancelled Quitting.{bcolors.ENDC}")
+                    else:
+                        mid_quit = True
+            def toggle_quit_and_save_step(event=None):
+                if keyboard.is_pressed("ctrl") and keyboard.is_pressed("shift") and keyboard.is_pressed("alt") and keyboard.is_pressed("q"):
+                    print(f" {bcolors.WARNING}Quitting and saving the model as soon as this step is done.{bcolors.ENDC}")
+                    nonlocal mid_quit_step
+                    if mid_quit_step == True:
+                        mid_quit_step = False
+                        print(f" {bcolors.WARNING}Cancelled Quitting.{bcolors.ENDC}")
+                    else:
+                        mid_quit_step = True
+            def help(event=None):
+                if keyboard.is_pressed("ctrl") and keyboard.is_pressed("h"):
+                    print_instructions()
+            keyboard.on_press_key("g", toggle_gui)
+            keyboard.on_press_key("s", toggle_checkpoint)
+            keyboard.on_press_key("p", toggle_sample)
+            keyboard.on_press_key("s", toggle_checkpoint_step)
+            keyboard.on_press_key("p", toggle_sample_step)
+            keyboard.on_press_key("q", toggle_quit_and_save_epoch)
+            keyboard.on_press_key("q", toggle_quit_and_save_step)
+            keyboard.on_press_key("h", help)
+            print_instructions()
         except:
             pass
-        keyboard.on_press_key("g", toggle_gui)
-        keyboard.on_press_key("s", toggle_checkpoint)
-        keyboard.on_press_key("p", toggle_sample)
-        print(f"{bcolors.WARNING}Use 'CTRL+SHIFT+G' to open up a GUI to play around with the model (will pause training){bcolors.ENDC}")
-        print(f"{bcolors.WARNING}Use 'CTRL+SHIFT+S' to save a checkpoint of the current epoch{bcolors.ENDC}")
-        print(f"{bcolors.WARNING}Use 'CTRL+SHIFT+P' to generate samples for current epoch{bcolors.ENDC}")
+
         mid_generation = False
         mid_checkpoint = False
         mid_sample = False
+        mid_checkpoint_step = False
+        mid_sample_step = False
+        mid_quit = False
+        mid_quit_step = False
         #lambda set mid_generation to true
         
         
         for epoch in range(args.num_train_epochs):
+            #every 10 epochs print instructions
             unet.train()
             if args.train_text_encoder:
                 text_encoder.train()
@@ -2047,16 +2210,18 @@ def main():
                     os.mkdir(frozen_directory)
                     save_and_sample_weights(epoch,'epoch')
                     args.stop_text_encoder_training = epoch
-
+            progress_bar_inter_epoch.set_description("Steps To Epoch")
+            progress_bar_inter_epoch.reset(total=num_update_steps_per_epoch)
             for step, batch in enumerate(train_dataloader):
                 with accelerator.accumulate(unet):
                     # Convert images to latent space
                     with torch.no_grad():
-                        if not args.not_cache_latents:
-                            latent_dist = batch[0][0]
-                        else:
-                            latent_dist = vae.encode(batch["pixel_values"].to(dtype=weight_dtype)).latent_dist
+                        latent_dist = batch[0][0]
                         latents = latent_dist.sample() * 0.18215
+                        if args.model_variant == "inpainting":
+                            conditioning_latent_dist = batch[0][2]
+                            mask = batch[0][3]
+                            conditioning_latents = conditioning_latent_dist.sample() * 0.18215
 
                     # Sample noise that we'll add to the latents
                     noise = torch.randn_like(latents)
@@ -2071,28 +2236,27 @@ def main():
 
                     # Get the text embedding for conditioning
                     with text_enc_context:
-                        if not args.not_cache_latents:
-                            if args.train_text_encoder:
-                                if args.clip_penultimate == True:
-                                    encoder_hidden_states = text_encoder(batch[0][1],output_hidden_states=True)
-                                    encoder_hidden_states = text_encoder.text_model.final_layer_norm(encoder_hidden_states['hidden_states'][-2])
-                                else:
-                                    encoder_hidden_states = text_encoder(batch[0][1])[0]
+                        if args.train_text_encoder:
+                            if args.clip_penultimate == True:
+                                encoder_hidden_states = text_encoder(batch[0][1],output_hidden_states=True)
+                                encoder_hidden_states = text_encoder.text_model.final_layer_norm(encoder_hidden_states['hidden_states'][-2])
                             else:
-                                encoder_hidden_states = batch[0][1]
+                                encoder_hidden_states = text_encoder(batch[0][1])[0]
                         else:
-                            if args.train_text_encoder:
-                                if args.clip_penultimate == True:
-                                    encoder_hidden_states = text_encoder(batch["input_ids"],output_hidden_states=True)
-                                    encoder_hidden_states = text_encoder.text_model.final_layer_norm(encoder_hidden_states['hidden_states'][-2])
-                                else:
-                                    encoder_hidden_states = text_encoder(batch["input_ids"])[0]
-                            else:
-                                encoder_hidden_states = text_encoder(batch["input_ids"])[0]
+                            encoder_hidden_states = batch[0][1]
 
                     # Predict the noise residual
-                    #noise_pred = unet(noisy_latents, timesteps, encoder_hidden_states).sample
-                    model_pred = unet(noisy_latents, timesteps, encoder_hidden_states).sample
+                    if args.model_variant == "inpainting":
+                        if random.uniform(0, 1) < 0.25:
+                            # for some steps, predict the unmasked image
+                            conditioning_latents = torch.stack([mask_latent[tuple([latents.shape[3]*8, latents.shape[2]*8])].squeeze()] * bsz)
+                            mask = torch.ones(bsz, 1, latents.shape[2], latents.shape[3]).to(accelerator.device, dtype=weight_dtype)
+
+                        noisy_inpaint_latents = torch.concat([noisy_latents, mask, conditioning_latents], 1)
+                        model_pred = unet(noisy_inpaint_latents, timesteps, encoder_hidden_states).sample
+                    elif args.model_variant == "base":
+                        model_pred = unet(noisy_latents, timesteps, encoder_hidden_states).sample
+                    
 
                     # Get the target for loss depending on the prediction type
                     if noise_scheduler.config.prediction_type == "epsilon":
@@ -2101,7 +2265,10 @@ def main():
                         target = noise_scheduler.get_velocity(latents, noise, timesteps)
                     else:
                         raise ValueError(f"Unknown prediction type {noise_scheduler.config.prediction_type}")
-                    del timesteps, noise, latents, noisy_latents, encoder_hidden_states
+                    if args.model_variant == "inpainting":
+                        del timesteps, noise, latents, noisy_latents,noisy_inpaint_latents, encoder_hidden_states
+                    elif args.model_variant == "base":
+                        del timesteps, noise, latents, noisy_latents, encoder_hidden_states
                     if args.with_prior_preservation:
                         # Chunk the noise and noise_pred into two parts and compute the loss on each part separately.
                         """
@@ -2151,15 +2318,30 @@ def main():
                     save_and_sample_weights(global_step,'step',save_model=False)
 
                 progress_bar.update(1)
+                progress_bar_inter_epoch.update(1)
                 progress_bar_e.refresh()
                 global_step += 1
 
                 if mid_generation==True:
                     mid_train_playground(global_step)
                     mid_generation=False
+                if mid_checkpoint_step == True:
+                    save_and_sample_weights(global_step,'step',save_model=True)
+                    mid_checkpoint_step=False
+                if mid_sample_step == True:
+                    save_and_sample_weights(global_step,'step',save_model=False)
+                    mid_sample_step=False
+                if mid_quit_step==True:
+                    accelerator.wait_for_everyone()
+                    save_and_sample_weights(global_step,'quit_step')
+                    quit()
                 if global_step >= args.max_train_steps:
                     break
             progress_bar_e.update(1)
+            if mid_quit==True:
+                accelerator.wait_for_everyone()
+                save_and_sample_weights(epoch,'quit_epoch')
+                quit()
             if not epoch % args.save_every_n_epoch:
                     #print(epoch % args.save_every_n_epoch)
                     #print('test')
@@ -2167,6 +2349,7 @@ def main():
                         save_and_sample_weights(epoch,'epoch')
                     else:
                         save_and_sample_weights(epoch,'epoch',False)
+                    print_instructions()
             if epoch % args.save_every_n_epoch and mid_checkpoint==True or mid_sample==True:
                 if mid_checkpoint==True:
                     save_and_sample_weights(epoch,'epoch',True)

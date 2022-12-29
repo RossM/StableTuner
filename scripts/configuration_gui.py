@@ -121,7 +121,22 @@ class ConceptWidget(ctk.CTkFrame):
         image = icon.resize((150, 150), Image.Resampling.LANCZOS)
         if path != "" and path != None:
             if os.path.exists(path):
-                files = os.listdir(path)
+                files = []
+                #if there are sub directories
+                if self.concept.process_sub_dirs:
+                    #get a list of all sub directories
+                    sub_dirs = [f.path for f in os.scandir(path) if f.is_dir()]
+                    #if there are sub directories
+                    if len(sub_dirs) != 0:
+                        #collect all images in sub directories
+                        for sub_dir in sub_dirs:
+                            #collect the full path of all files in the sub directory to files
+                            files += [os.path.join(sub_dir, f) for f in os.listdir(sub_dir)]
+                #if there are no sub directories
+                else:
+                    files = [os.path.join(path, f) for f in os.listdir(path)]
+                    #omit sub directories
+                    files = [f for f in files if not os.path.isdir(f)]
                 if len(files) != 0:
                     for i in range(4):
                         #get an image from the path
@@ -131,7 +146,7 @@ class ConceptWidget(ctk.CTkFrame):
                         files = [f for f in files if f.endswith(".jpg") or f.endswith(".png") or f.endswith(".jpeg")]
                         if len(files) != 0:
                             rand = random.choice(files)
-                            image_path = os.path.join(path,rand)
+                            image_path = rand
                             #remove image_path from files
                             if len(files) > 4:
                                 files.remove(rand)
@@ -188,6 +203,7 @@ class ConceptWindow(ctk.CTkToplevel):
         self.geometry("576x297")
         self.resizable(False, False)
         #self.protocol("WM_DELETE_WINDOW", self.on_close)
+        self.wait_visibility()
         self.grab_set()
         self.focus_set()
         self.default_image_preview = Image.open("resources/stableTuner_icon.png").resize((150, 150), Image.Resampling.LANCZOS)
@@ -348,7 +364,22 @@ class ConceptWindow(ctk.CTkToplevel):
         image = icon.resize((150, 150), Image.Resampling.LANCZOS)
         if path != "" and path != None:
             if os.path.exists(path):
-                files = os.listdir(path)
+                files = []
+                #if there are sub directories in the path
+                if self.concept.process_sub_dirs or self.process_sub_dirs_switch.get() == 1:
+                    #get a list of all sub directories
+                    sub_dirs = [f.path for f in os.scandir(path) if f.is_dir()]
+                    #if there are sub directories
+                    if len(sub_dirs) != 0:
+                        #collect all images in sub directories
+                        for sub_dir in sub_dirs:
+                            #collect the full path of all files in the sub directory to files
+                            files += [os.path.join(sub_dir, f) for f in os.listdir(sub_dir)]
+                #if there are no sub directories
+                else:
+                    files = [os.path.join(path, f) for f in os.listdir(path)]
+                    #omit sub directories
+                    files = [f for f in files if not os.path.isdir(f)]
                 if len(files) != 0:
                     for i in range(4):
                         #get an image from the path
@@ -770,6 +801,8 @@ class App(ctk.CTk):
             pass
 
     def create_default_variables(self):
+        self.model_variant = 'Regular'
+        self.model_variants = ['Regular', 'Inpaint']
         self.required_folders = ["vae", "unet", "tokenizer", "text_encoder"]
         self.aspect_ratio_bucketing_mode = 'Dynamic Fill'
         self.dynamic_bucketing_mode = 'Duplicate'
@@ -813,7 +846,7 @@ class App(ctk.CTk):
         self.auto_balance_concept_datasets = False
         self.sample_width = 512
         self.sample_height = 512
-        self.save_latents_cache = True
+        #self.save_latents_cache = True
         self.regenerate_latents_cache = False
         self.use_aspect_ratio_bucketing = True
         self.do_not_use_latents_cache = True
@@ -834,7 +867,7 @@ class App(ctk.CTk):
         self.play_cfg = 7.5
         self.play_steps = 25
         self.schedulers = ["DPMSolverMultistepScheduler", "PNDMScheduler", 'DDIMScheduler','EulerAncestralDiscreteScheduler','EulerDiscreteScheduler']
-        self.quick_select_models = ["Stable Diffusion 1.4", "Stable Diffusion 1.5", "Stable Diffusion 2 Base (512)", "Stable Diffusion 2 (768)", 'Stable Diffusion 2.1 Base (512)', "Stable Diffusion 2.1 (768)"]
+        self.quick_select_models = ["Stable Diffusion 1.4", "Stable Diffusion 1.5", "Stable Diffusion 1.5 Inpaint", "Stable Diffusion 2 Base (512)", "Stable Diffusion 2 (768)", 'Stable Diffusion 2 Inpaint', 'Stable Diffusion 2.1 Base (512)', "Stable Diffusion 2.1 (768)"]
         self.play_scheduler = 'DPMSolverMultistepScheduler'
         self.pipe = None
         self.current_model = None
@@ -966,10 +999,16 @@ class App(ctk.CTk):
             self.input_model_path_entry.delete(0, tk.END)
             if val == 'Stable Diffusion 1.4':
                 self.input_model_path_entry.insert(0,"CompVis/stable-diffusion-v1-4")
+                self.model_variant_var.set("Regular")
             elif val == 'Stable Diffusion 1.5':
                 self.input_model_path_entry.insert(0,"runwayml/stable-diffusion-v1-5")
+                self.model_variant_var.set("Regular")
+            elif val == 'Stable Diffusion 1.5 Inpaint':
+                self.input_model_path_entry.insert(0,"runwayml/stable-diffusion-inpainting")
+                self.model_variant_var.set("Inpaint")
             elif val == 'Stable Diffusion 2 Base (512)':
                 self.input_model_path_entry.insert(0,"stabilityai/stable-diffusion-2-base")
+                self.model_variant_var.set("Regular")
             elif val == 'Stable Diffusion 2 (768)':
                 self.input_model_path_entry.insert(0,"stabilityai/stable-diffusion-2")
                 self.resolution_var.set("768")
@@ -977,8 +1016,13 @@ class App(ctk.CTk):
                 self.sample_height_entry.insert(0,"768")
                 self.sample_width_entry.delete(0, tk.END)
                 self.sample_width_entry.insert(0,"768")
+                self.model_variant_var.set("Regular")
+            elif val == 'Stable Diffusion 2 Inpaint':
+                self.input_model_path_entry.insert(0,"stabilityai/stable-diffusion-2-inpainting")
+                self.model_variant_var.set("Inpaint")
             elif val == 'Stable Diffusion 2.1 Base (512)':
                 self.input_model_path_entry.insert(0,"stabilityai/stable-diffusion-2-1-base")
+                self.model_variant_var.set("Regular")
             elif val == 'Stable Diffusion 2.1 (768)':
                 self.input_model_path_entry.insert(0,"stabilityai/stable-diffusion-2-1")
                 self.resolution_var.set("768")
@@ -986,6 +1030,7 @@ class App(ctk.CTk):
                 self.sample_height_entry.insert(0,"768")
                 self.sample_width_entry.delete(0, tk.END)
                 self.sample_width_entry.insert(0,"768")
+                self.model_variant_var.set("Regular")
     def override_training_style_widgets(self):
         for i in self.training_frame_subframe.children.values():
             if 'ctkbutton' in str(i):
@@ -1262,6 +1307,16 @@ class App(ctk.CTk):
     def create_trainer_settings_widgets(self):
         self.training_frame_title = ctk.CTkLabel(self.training_frame, text="Training Settings", font=ctk.CTkFont(size=20, weight="bold"))
         self.training_frame_title.grid(row=0, column=0, padx=20, pady=20)   
+        
+        #add a model variant dropdown
+        self.model_variant_label = ctk.CTkLabel(self.training_frame_subframe, text="Model Variant")
+        model_variant_label_ttp = CreateToolTip(self.model_variant_label, "The model type you're training.")
+        self.model_variant_label.grid(row=0, column=0, sticky="nsew")
+        self.model_variant_var = tk.StringVar()
+        self.model_variant_var.set(self.model_variant)
+        self.model_variant_dropdown = ctk.CTkOptionMenu(self.training_frame_subframe, values=self.model_variants, variable=self.model_variant_var)
+    
+        
         #add a seed entry
         self.seed_label = ctk.CTkLabel(self.training_frame_subframe, text="Seed")
         seed_label_ttp = CreateToolTip(self.seed_label, "The seed to use for training.")
@@ -1357,24 +1412,24 @@ class App(ctk.CTk):
         #self.num_warmup_steps_entry.grid(row=11, column=1, sticky="nsew")
         self.num_warmup_steps_entry.insert(0, self.learning_rate_warmup_steps)
         #create use latent cache checkbox
-        self.use_latent_cache_var = tk.IntVar()
-        self.use_latent_cache_var.set(self.do_not_use_latents_cache)
+        #self.use_latent_cache_var = tk.IntVar()
+        #self.use_latent_cache_var.set(self.do_not_use_latents_cache)
         #create label
-        self.use_latent_cache_label = ctk.CTkLabel(self.training_frame_subframe, text="Use Latent Cache")
-        use_latent_cache_label_ttp = CreateToolTip(self.use_latent_cache_label, "Cache the latents to speed up training.")
+        #self.use_latent_cache_label = ctk.CTkLabel(self.training_frame_subframe, text="Use Latent Cache")
+        #use_latent_cache_label_ttp = CreateToolTip(self.use_latent_cache_label, "Cache the latents to speed up training.")
         #self.use_latent_cache_label.grid(row=12, column=0, sticky="nsew")
         #create checkbox
-        self.use_latent_cache_checkbox = ctk.CTkSwitch(self.training_frame_subframe, variable=self.use_latent_cache_var)
+        #self.use_latent_cache_checkbox = ctk.CTkSwitch(self.training_frame_subframe, variable=self.use_latent_cache_var)
         #self.use_latent_cache_checkbox.grid(row=12, column=1, sticky="nsew")
         #create save latent cache checkbox
-        self.save_latent_cache_var = tk.IntVar()
-        self.save_latent_cache_var.set(self.save_latents_cache)
+        #self.save_latent_cache_var = tk.IntVar()
+        #self.save_latent_cache_var.set(self.save_latents_cache)
         #create label
-        self.save_latent_cache_label = ctk.CTkLabel(self.training_frame_subframe, text="Save Latent Cache")
-        save_latent_cache_label_ttp = CreateToolTip(self.save_latent_cache_label, "Save the latents cache to disk after generation, will be remade if batch size changes.")
+        #self.save_latent_cache_label = ctk.CTkLabel(self.training_frame_subframe, text="Save Latent Cache")
+        #save_latent_cache_label_ttp = CreateToolTip(self.save_latent_cache_label, "Save the latents cache to disk after generation, will be remade if batch size changes.")
         #self.save_latent_cache_label.grid(row=13, column=0, sticky="nsew")
         #create checkbox
-        self.save_latent_cache_checkbox = ctk.CTkSwitch(self.training_frame_subframe, variable=self.save_latent_cache_var)
+        #self.save_latent_cache_checkbox = ctk.CTkSwitch(self.training_frame_subframe, variable=self.save_latent_cache_var)
         #self.save_latent_cache_checkbox.grid(row=13, column=1, sticky="nsew")
         #create regnerate latent cache checkbox
         self.regenerate_latent_cache_var = tk.IntVar()
@@ -2779,8 +2834,8 @@ class App(ctk.CTk):
         configure["learning_rate"] = self.learning_rate_entry.get()
         configure["warmup_steps"] = self.num_warmup_steps_entry.get()
         configure["learning_rate_scheduler"] = self.learning_rate_scheduler_var.get()
-        configure["use_latent_cache"] = self.use_latent_cache_var.get()
-        configure["save_latent_cache"] = self.save_latent_cache_var.get()
+        #configure["use_latent_cache"] = self.use_latent_cache_var.get()
+        #configure["save_latent_cache"] = self.save_latent_cache_var.get()
         configure["regenerate_latent_cache"] = self.regenerate_latent_cache_var.get()
         configure["train_text_encoder"] = self.train_text_encoder_var.get()
         configure["with_prior_loss_preservation"] = self.with_prior_loss_preservation_var.get()
@@ -2811,6 +2866,7 @@ class App(ctk.CTk):
         configure['use_ema'] = self.use_ema_var.get()
         configure['aspect_ratio_bucketing_mode'] = self.aspect_ratio_bucketing_mode_var.get()
         configure['dynamic_bucketing_mode'] = self.dynamic_bucketing_mode_var.get()
+        configure['model_variant'] = self.model_variant_var.get()
         #save the configure file
         #if the file exists, delete it
         if os.path.exists(file_name):
@@ -2843,7 +2899,6 @@ class App(ctk.CTk):
                 class_data_dir = configure["concepts"][i]["class_data_dir"]
                 if 'flip_p' not in configure["concepts"][i]:
                     print(configure["concepts"][i].keys())
-                    print('test')
                     configure["concepts"][i]['flip_p'] = ''
                 flip_p = configure["concepts"][i]["flip_p"]
                 balance_dataset = configure["concepts"][i]["do_not_balance"]
@@ -2901,8 +2956,8 @@ class App(ctk.CTk):
         self.num_warmup_steps_entry.delete(0, tk.END)
         self.num_warmup_steps_entry.insert(0, configure["warmup_steps"])
         self.learning_rate_scheduler_var.set(configure["learning_rate_scheduler"])
-        self.use_latent_cache_var.set(configure["use_latent_cache"])
-        self.save_latent_cache_var.set(configure["save_latent_cache"])
+        #self.use_latent_cache_var.set(configure["use_latent_cache"])
+        #self.save_latent_cache_var.set(configure["save_latent_cache"])
         self.regenerate_latent_cache_var.set(configure["regenerate_latent_cache"])
         self.train_text_encoder_var.set(configure["train_text_encoder"])
         self.with_prior_loss_preservation_var.set(configure["with_prior_loss_preservation"])
@@ -2952,6 +3007,7 @@ class App(ctk.CTk):
             self.aspect_ratio_bucketing_mode_option_menu.configure(state='disabled')
             self.dynamic_bucketing_mode_label.configure(state='disabled')
             self.dynamic_bucketing_mode_option_menu.configure(state='disabled')
+        self.model_variant_var.set(configure["model_variant"])
         self.aspect_ratio_bucketing_mode_var.set(configure["aspect_ratio_bucketing_mode"])
         self.dynamic_bucketing_mode_var.set(configure["dynamic_bucketing_mode"])
         self.update()
@@ -2983,8 +3039,8 @@ class App(ctk.CTk):
         self.learning_rate = self.learning_rate_entry.get()
         self.warmup_steps = self.num_warmup_steps_entry.get()
         self.learning_rate_scheduler = self.learning_rate_scheduler_var.get()
-        self.use_latent_cache = self.use_latent_cache_var.get()
-        self.save_latent_cache = self.save_latent_cache_var.get()
+        #self.use_latent_cache = self.use_latent_cache_var.get()
+        #self.save_latent_cache = self.save_latent_cache_var.get()
         self.regenerate_latent_cache = self.regenerate_latent_cache_var.get()
         self.train_text_encoder = self.train_text_encoder_var.get()
         self.with_prior_loss_preservation = self.with_prior_loss_preservation_var.get()
@@ -3014,6 +3070,7 @@ class App(ctk.CTk):
         self.use_ema = self.use_ema_var.get()
         self.aspect_ratio_bucketing_mode = self.aspect_ratio_bucketing_mode_var.get()
         self.dynamic_bucketing_mode = self.dynamic_bucketing_mode_var.get()
+        self.model_variant = self.model_variant_var.get()
         mode = 'normal'
         if self.cloud_mode == False and export == None:
             #check if output path exists
@@ -3066,6 +3123,9 @@ class App(ctk.CTk):
                         except:
                             print("Error trying to see if regenerating latent cache is needed, this means it probably needs to be regenerated and ST was updated recently.")
                             pass
+                    else:
+                        messagebox.showinfo("StableTuner", "Configuration changed, regenerating latent cache")
+                        self.regenerate_latent_cache = True
             except Exception as e:
                 print(e)
                 print("Error checking last run, regenerating latent cache")
@@ -3081,6 +3141,18 @@ class App(ctk.CTk):
             batBase = 'accelerate "launch" "--mixed_precision=no" "scripts/trainer.py"'
             if export == 'Linux':
                 batBase = f'accelerate launch --mixed_precision="no" scripts/trainer.py'
+        
+        if self.model_variant == 'Regular':
+            if export == 'Linux':
+                batBase += ' --model_variant="base"'
+            else:
+                batBase += ' "--model_variant=base" '
+        elif self.model_variant == 'Inpaint':
+            if export == 'Linux':
+                batBase += ' --model_variant="inpainting"'
+            else:
+                batBase += ' "--model_variant=inpainting" '
+
         if self.disable_cudnn_benchmark == True:
             if export == 'Linux':
                 batBase += ' --disable_cudnn_benchmark'
@@ -3178,16 +3250,6 @@ class App(ctk.CTk):
             batBase += f' "--learning_rate={self.learning_rate}" '
             batBase += f' "--lr_warmup_steps={self.warmup_steps}" '
             batBase += f' "--lr_scheduler={self.learning_rate_scheduler}" '
-        if self.use_latent_cache == False:
-            if export == 'Linux':
-                batBase += ' --not_cache_latents'
-            else:
-                batBase += f' "--not_cache_latents" '
-        if self.save_latent_cache == True:
-            if export == 'Linux':
-                batBase += ' --save_latents_cache'
-            else:
-                batBase += f' "--save_latents_cache" '
         if self.regenerate_latent_cache == True:
             if export == 'Linux':
                 batBase += ' --regenerate_latent_cache'
