@@ -801,8 +801,11 @@ class App(ctk.CTk):
             pass
 
     def create_default_variables(self):
+        self.attention = 'xformers'
+        self.attention_types = ['xformers','Flash Attention']
         self.model_variant = 'Regular'
-        self.model_variants = ['Regular', 'Inpaint']
+        self.model_variants = ['Regular', 'Inpaint','Depth2Img']
+        self.fallback_mask_prompt = ''
         self.required_folders = ["vae", "unet", "tokenizer", "text_encoder"]
         self.aspect_ratio_bucketing_mode = 'Dynamic Fill'
         self.dynamic_bucketing_mode = 'Duplicate'
@@ -867,7 +870,7 @@ class App(ctk.CTk):
         self.play_cfg = 7.5
         self.play_steps = 25
         self.schedulers = ["DPMSolverMultistepScheduler", "PNDMScheduler", 'DDIMScheduler','EulerAncestralDiscreteScheduler','EulerDiscreteScheduler']
-        self.quick_select_models = ["Stable Diffusion 1.4", "Stable Diffusion 1.5", "Stable Diffusion 1.5 Inpaint", "Stable Diffusion 2 Base (512)", "Stable Diffusion 2 (768)", 'Stable Diffusion 2 Inpaint', 'Stable Diffusion 2.1 Base (512)', "Stable Diffusion 2.1 (768)"]
+        self.quick_select_models = ["Stable Diffusion 1.4", "Stable Diffusion 1.5", "Stable Diffusion 1.5 Inpaint", "Stable Diffusion 2 Base (512)", "Stable Diffusion 2 (768)", 'Stable Diffusion 2 Inpaint','Stable Diffusion 2 Depth2Img', 'Stable Diffusion 2.1 Base (512)', "Stable Diffusion 2.1 (768)"]
         self.play_scheduler = 'DPMSolverMultistepScheduler'
         self.pipe = None
         self.current_model = None
@@ -1020,6 +1023,9 @@ class App(ctk.CTk):
             elif val == 'Stable Diffusion 2 Inpaint':
                 self.input_model_path_entry.insert(0,"stabilityai/stable-diffusion-2-inpainting")
                 self.model_variant_var.set("Inpaint")
+            elif val == 'Stable Diffusion 2 Depth2Img':
+                self.input_model_path_entry.insert(0,"stabilityai/stable-diffusion-2-depth")
+                self.model_variant_var.set("Depth2Img")
             elif val == 'Stable Diffusion 2.1 Base (512)':
                 self.input_model_path_entry.insert(0,"stabilityai/stable-diffusion-2-1-base")
                 self.model_variant_var.set("Regular")
@@ -1315,8 +1321,15 @@ class App(ctk.CTk):
         self.model_variant_var = tk.StringVar()
         self.model_variant_var.set(self.model_variant)
         self.model_variant_dropdown = ctk.CTkOptionMenu(self.training_frame_subframe, values=self.model_variants, variable=self.model_variant_var)
-    
-        
+        #add attention optionMenu
+        self.attention_label = ctk.CTkLabel(self.training_frame_subframe, text="Attention")
+        attention_label_ttp = CreateToolTip(self.attention_label, "The attention type to use. Flash Attention may enable lower VRAM training but Xformers will be faster and better for bigger batch sizes.")
+        self.attention_label.grid(row=1, column=0, sticky="nsew")
+        self.attention_var = tk.StringVar()
+        self.attention_var.set(self.attention)
+        self.attention_dropdown = ctk.CTkOptionMenu(self.training_frame_subframe, values=self.attention_types, variable=self.attention_var)
+        #add a batch size entry
+
         #add a seed entry
         self.seed_label = ctk.CTkLabel(self.training_frame_subframe, text="Seed")
         seed_label_ttp = CreateToolTip(self.seed_label, "The seed to use for training.")
@@ -1605,9 +1618,12 @@ class App(ctk.CTk):
         self.dynamic_bucketing_mode_option_menu = ctk.CTkOptionMenu(self.dataset_frame_subframe, variable=self.dynamic_bucketing_mode_var, values=['Duplicate', 'Drop'])
         self.dynamic_bucketing_mode_option_menu.grid(row=9, column=1, sticky="nsew")
         #option menu to select dynamic bucketing mode (if enabled)
-
-        
-
+        self.fallback_mask_prompt_label = ctk.CTkLabel(self.dataset_frame_subframe, text="Fallback Mask Prompt")
+        fallback_mask_prompt_label_ttp = CreateToolTip(self.fallback_mask_prompt_label, "A prompt used for masking images without a mask. Only used when training inpainting models.")
+        self.fallback_mask_prompt_entry = ctk.CTkEntry(self.dataset_frame_subframe)
+        self.fallback_mask_prompt_entry.insert(0, self.fallback_mask_prompt)
+        self.fallback_mask_prompt_label.grid(row=10, column=0, sticky="nsew")
+        self.fallback_mask_prompt_entry.grid(row=10, column=1, sticky="nsew")
         #add download dataset entry
         #add a switch to duplicate fill bucket
         #self.duplicate_fill_buckets_var = tk.IntVar()
@@ -2867,6 +2883,8 @@ class App(ctk.CTk):
         configure['aspect_ratio_bucketing_mode'] = self.aspect_ratio_bucketing_mode_var.get()
         configure['dynamic_bucketing_mode'] = self.dynamic_bucketing_mode_var.get()
         configure['model_variant'] = self.model_variant_var.get()
+        configure['fallback_mask_prompt'] = self.fallback_mask_prompt_entry.get()
+        configure['attention'] = self.attention_var.get()
         #save the configure file
         #if the file exists, delete it
         if os.path.exists(file_name):
@@ -3008,8 +3026,11 @@ class App(ctk.CTk):
             self.dynamic_bucketing_mode_label.configure(state='disabled')
             self.dynamic_bucketing_mode_option_menu.configure(state='disabled')
         self.model_variant_var.set(configure["model_variant"])
+        self.fallback_mask_prompt_entry.delete(0, tk.END)
+        self.fallback_mask_prompt_entry.insert(0, configure["fallback_mask_prompt"])
         self.aspect_ratio_bucketing_mode_var.set(configure["aspect_ratio_bucketing_mode"])
         self.dynamic_bucketing_mode_var.set(configure["dynamic_bucketing_mode"])
+        self.attention_var.set(configure["attention"])
         self.update()
     
     def process_inputs(self,export=None):
@@ -3071,6 +3092,8 @@ class App(ctk.CTk):
         self.aspect_ratio_bucketing_mode = self.aspect_ratio_bucketing_mode_var.get()
         self.dynamic_bucketing_mode = self.dynamic_bucketing_mode_var.get()
         self.model_variant = self.model_variant_var.get()
+        self.fallback_mask_prompt = self.fallback_mask_prompt_entry.get()
+        self.attention = self.attention_var.get()
         mode = 'normal'
         if self.cloud_mode == False and export == None:
             #check if output path exists
@@ -3141,7 +3164,16 @@ class App(ctk.CTk):
             batBase = 'accelerate "launch" "--mixed_precision=no" "scripts/trainer.py"'
             if export == 'Linux':
                 batBase = f'accelerate launch --mixed_precision="no" scripts/trainer.py'
-        
+        if self.attention == 'xformers':
+            if export == 'Linux':
+                batBase += ' --attention="xformers"'
+            else:
+                batBase += ' "--attention=xformers" '
+        elif self.attention == 'Flash Attention':
+            if export == 'Linux':
+                batBase += ' --attention="flash_attention"'
+            else:
+                batBase += ' "--attention=flash_attention" '
         if self.model_variant == 'Regular':
             if export == 'Linux':
                 batBase += ' --model_variant="base"'
@@ -3152,6 +3184,17 @@ class App(ctk.CTk):
                 batBase += ' --model_variant="inpainting"'
             else:
                 batBase += ' "--model_variant=inpainting" '
+        elif self.model_variant == 'Depth2Img':
+            if export == 'Linux':
+                batBase += ' --model_variant="depth2img"'
+            else:
+                batBase += ' "--model_variant=depth2img" '
+
+        if self.fallback_mask_prompt != '':
+            if export == 'Linux':
+                batBase += f' --add_mask_prompt="{self.fallback_mask_prompt}"'
+            else:
+                batBase += f' "--add_mask_prompt={self.fallback_mask_prompt}" '
 
         if self.disable_cudnn_benchmark == True:
             if export == 'Linux':
