@@ -801,6 +801,7 @@ class App(ctk.CTk):
             pass
 
     def create_default_variables(self):
+        self.batch_prompt_sampling_num_prompts = '0'
         self.save_safetensors = False
         self.attention = 'xformers'
         self.attention_types = ['xformers','Flash Attention']
@@ -1372,7 +1373,7 @@ class App(ctk.CTk):
         #self.mixed_precision_label.grid(row=5, column=0, sticky="nsew")
         self.mixed_precision_var = tk.StringVar()
         self.mixed_precision_var.set(self.mixed_precision)
-        self.mixed_precision_dropdown = ctk.CTkOptionMenu(self.training_frame_subframe, variable=self.mixed_precision_var,values=["fp16", "fp32"])
+        self.mixed_precision_dropdown = ctk.CTkOptionMenu(self.training_frame_subframe, variable=self.mixed_precision_var,values=["bf16","fp16", "fp32"])
         #self.mixed_precision_dropdown.grid(row=5, column=1, sticky="nsew")
 
         #create use 8bit adam checkbox
@@ -1698,6 +1699,17 @@ class App(ctk.CTk):
         #create checkbox
         self.sample_random_aspect_ratio_checkbox = ctk.CTkSwitch(self.sampling_frame_subframe, variable=self.sample_random_aspect_ratio_var)
         self.sample_random_aspect_ratio_checkbox.grid(row=7, column=1, sticky="nsew")
+        
+        #create an optionmenu to select a number of desired prompts to sample from the batch
+        self.batch_prompt_sampling_optionmenu_var = tk.StringVar()
+        self.batch_prompt_sampling_optionmenu_var.set(self.batch_prompt_sampling_num_prompts)
+        self.batch_prompt_sampling_label = ctk.CTkLabel(self.sampling_frame_subframe, text="Batch Prompt Sampling")
+        self.batch_prompt_sampling_label.grid(row=8, column=0, sticky="nsew")
+        self.batch_prompt_sampling_optionmenu = ctk.CTkOptionMenu(self.sampling_frame_subframe, variable=self.batch_prompt_sampling_optionmenu_var, values=['0','1','2','3','4','5','6','7','8','9','10'])
+        self.batch_prompt_sampling_optionmenu_ttp = CreateToolTip(self.batch_prompt_sampling_label, "Will try to sample prompts/tokens from the batch to use as prompts for the samples.")
+        self.batch_prompt_sampling_optionmenu.grid(row=8, column=1, sticky="nsew")
+        
+        
         #create add sample prompt button
         self.add_sample_prompt_button = ctk.CTkButton(self.sampling_frame_subframe, text="Add Sample Prompt",  command=self.add_sample_prompt)
         add_sample_prompt_button_ttp = CreateToolTip(self.add_sample_prompt_button, "Add a sample prompt to the list.")
@@ -1854,6 +1866,8 @@ class App(ctk.CTk):
         #add convert to ckpt button
         self.play_convert_to_ckpt_button = ctk.CTkButton(self.playground_frame_subframe, text="Convert To CKPT", command=lambda:self.convert_to_ckpt(model_path=self.play_model_entry.get()))
         #add interative generation button to act as a toggle
+        #convert to safetensors button
+        
         #self.play_interactive_generation_button_bool = tk.BooleanVar()
         #self.play_interactive_generation_button = ctk.CTkButton(self.playground_frame_subframe, text="Interactive Generation", command=self.interactive_generation_button)
         #self.play_interactive_generation_button_bool.set(False)#add play model entry with button to open file dialog
@@ -1873,9 +1887,13 @@ class App(ctk.CTk):
         #add a button to convert to ckpt
         self.convert_to_ckpt_button = ctk.CTkButton(self.toolbox_frame_subframe, text="Convert Diffusers To CKPT", command=lambda:self.convert_to_ckpt())
         self.convert_to_ckpt_button.grid(row=4, column=0, columnspan=1, sticky="nsew")
+        #convert to safetensors button
+        self.convert_to_safetensors_button = ctk.CTkButton(self.toolbox_frame_subframe, text="Convert Diffusers To SafeTensors", command=lambda:self.convert_to_safetensors())
+        self.convert_to_safetensors_button.grid(row=4, column=1, columnspan=1, sticky="nsew")
+        
         #add a button to convert ckpt to diffusers
         self.convert_ckpt_to_diffusers_button = ctk.CTkButton(self.toolbox_frame_subframe, text="Convert CKPT To Diffusers", command=lambda:self.convert_ckpt_to_diffusers())
-        self.convert_ckpt_to_diffusers_button.grid(row=4, column=1, columnspan=1, sticky="nsew")
+        self.convert_ckpt_to_diffusers_button.grid(row=4, column=2, columnspan=1, sticky="nsew")
         #empty row
         self.empty_row = ctk.CTkLabel(self.toolbox_frame_subframe, text="")
         self.empty_row.grid(row=6, column=0, sticky="nsew")
@@ -2231,20 +2249,21 @@ class App(ctk.CTk):
             #file dialog to save diffusers model
             output_path = fd.askdirectory(initialdir=os.getcwd(), title="Select where to save Diffusers Model Directory")
         version, prediction = self.get_sd_version(ckpt_path)
-        self.convert_model_dialog = tk.Toplevel(self)
-        self.convert_model_dialog.title("Converting model")
+        #self.convert_model_dialog = ctk.CTkToplevel(self, takefocus=True)
+        #self.convert_model_dialog.title("Converting model")
         #label
-        empty_label = ctk.CTkLabel(self.convert_model_dialog, text="")
-        empty_label.pack()
-        label = ctk.CTkLabel(self.convert_model_dialog, text="Converting CKPT to Diffusers. Please wait...")
-        label.pack()
-        self.convert_model_dialog.geometry("300x70")
-        self.convert_model_dialog.resizable(False, False)
-        self.convert_model_dialog.grab_set()
-        self.convert_model_dialog.focus_set()
-        self.update()
+        #empty_label = ctk.CTkLabel(self.convert_model_dialog, text="")
+        #empty_label.pack()
+        #label = ctk.CTkLabel(self.convert_model_dialog, text="Converting CKPT to Diffusers. Please wait...")
+        #label.pack()
+        #self.convert_model_dialog.geometry("300x70")
+        #self.convert_model_dialog.resizable(False, False)
+        #self.convert_model_dialog.grab_set()
+        #self.convert_model_dialog.focus_set()
+        #self.update()
         convert = converters.Convert_SD_to_Diffusers(ckpt_path,output_path,prediction_type=prediction,version=version)
-        self.convert_model_dialog.destroy()
+        
+        #self.convert_model_dialog.destroy()
 
     def convert_to_ckpt(self,model_path=None, output_path=None,name=None):
         if model_path is None:
@@ -2264,7 +2283,7 @@ class App(ctk.CTk):
         if not output_path or output_path == "":
             return
 
-        self.convert_model_dialog = tk.Toplevel(self)
+        self.convert_model_dialog = ctk.CTkToplevel(self)
         self.convert_model_dialog.title("Converting model")
         #label
         empty_label = ctk.CTkLabel(self.convert_model_dialog, text="")
@@ -2279,7 +2298,39 @@ class App(ctk.CTk):
         converters.Convert_Diffusers_to_SD(model_path, output_path)
         self.convert_model_dialog.destroy()
         #messagebox.showinfo("Conversion Complete", "Conversion Complete")
-    
+    def convert_to_safetensors(self,model_path=None, output_path=None,name=None):
+        if model_path is None:
+            model_path = fd.askdirectory(initialdir=self.output_path_entry.get(), title="Select Diffusers Model Directory")
+        #check if model path has vae,unet,text_encoder,tokenizer,scheduler and args.json and model_index.json
+        if output_path is None:
+            output_path = fd.asksaveasfilename(initialdir=os.getcwd(),title = "Save Safetensors file",filetypes = (("safetensors files","*.safetensors"),("all files","*.*")))
+        if not os.path.exists(model_path) and not os.path.exists(os.path.join(model_path,"vae")) and not os.path.exists(os.path.join(model_path,"unet")) and not os.path.exists(os.path.join(model_path,"text_encoder")) and not os.path.exists(os.path.join(model_path,"tokenizer")) and not os.path.exists(os.path.join(model_path,"scheduler")) and not os.path.exists(os.path.join(model_path,"args.json")) and not os.path.exists(os.path.join(model_path,"model_index.json")):
+            messagebox.showerror("Error", "Couldn't find model structure in path")
+            return
+            #check if ckpt in output path
+        if name != None:
+            output_path = os.path.join(output_path,name+".safetensors")
+        if not output_path.endswith(".safetensors") and output_path != "":
+            #add ckpt to output path
+            output_path = output_path + ".safetensors"
+        if not output_path or output_path == "":
+            return
+
+        self.convert_model_dialog = ctk.CTkToplevel(self)
+        self.convert_model_dialog.title("Converting model")
+        #label
+        empty_label = ctk.CTkLabel(self.convert_model_dialog, text="")
+        empty_label.pack()
+        label = ctk.CTkLabel(self.convert_model_dialog, text="Converting Diffusers to CKPT. Please wait...")
+        label.pack()
+        self.convert_model_dialog.geometry("300x70")
+        self.convert_model_dialog.resizable(False, False)
+        self.convert_model_dialog.grab_set()
+        self.convert_model_dialog.focus_set()
+        self.update()
+        converters.Convert_Diffusers_to_SD(model_path, output_path)
+        self.convert_model_dialog.destroy()
+        #messagebox.showinfo("Conversion Complete", "Conversion Complete")
     #function to act as a callback when the user adds a new concept data path to generate a new preview image
     def update_preview_image(self, event):
         #check if entry has changed
@@ -2597,7 +2648,7 @@ class App(ctk.CTk):
                 os.mkdir(model_path)
                 #converter
                 #show a dialog to inform the user that the model is being converted
-                self.convert_model_dialog = tk.Toplevel(self)
+                self.convert_model_dialog = ctk.CTkToplevel(self)
                 self.convert_model_dialog.title("Converting model")
                 #label
                 empty_label = ctk.CTkLabel(self.convert_model_dialog, text="")
@@ -2888,6 +2939,7 @@ class App(ctk.CTk):
         configure['model_variant'] = self.model_variant_var.get()
         configure['fallback_mask_prompt'] = self.fallback_mask_prompt_entry.get()
         configure['attention'] = self.attention_var.get()
+        configure['batch_prompt_sampling'] = int(self.batch_prompt_sampling_optionmenu_var.get())
         #save the configure file
         #if the file exists, delete it
         if os.path.exists(file_name):
@@ -3034,6 +3086,7 @@ class App(ctk.CTk):
         self.aspect_ratio_bucketing_mode_var.set(configure["aspect_ratio_bucketing_mode"])
         self.dynamic_bucketing_mode_var.set(configure["dynamic_bucketing_mode"])
         self.attention_var.set(configure["attention"])
+        self.batch_prompt_sampling_optionmenu_var.set(str(configure['batch_prompt_sampling']))
         self.update()
     
     def process_inputs(self,export=None):
@@ -3097,6 +3150,7 @@ class App(ctk.CTk):
         self.model_variant = self.model_variant_var.get()
         self.fallback_mask_prompt = self.fallback_mask_prompt_entry.get()
         self.attention = self.attention_var.get()
+        self.batch_prompt_sampling = int(self.batch_prompt_sampling_optionmenu_var.get())
         mode = 'normal'
         if self.cloud_mode == False and export == None:
             #check if output path exists
@@ -3169,6 +3223,11 @@ class App(ctk.CTk):
             batBase = 'accelerate "launch" "--mixed_precision=no" "scripts/trainer.py"'
             if export == 'Linux':
                 batBase = f'accelerate launch --mixed_precision="no" scripts/trainer.py'
+        if self.batch_prompt_sampling != 0:
+            if export == 'Linux':
+                batBase += f' --sample_from_batch={self.batch_prompt_sampling}'
+            else:
+                batBase += f' "--sample_from_batch={self.batch_prompt_sampling}"'
         if self.attention == 'xformers':
             if export == 'Linux':
                 batBase += ' --attention="xformers"'
