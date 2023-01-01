@@ -358,7 +358,7 @@ def parse_args():
         help="Path to json containing multiple concepts, will overwrite parameters like instance_prompt, class_prompt, etc.",
     )
     parser.add_argument("--save_sample_controlled_seed", type=int, action='append', help="Set a seed for an extra sample image to be constantly saved.")
-    parser.add_argument("--delete_checkpoints_when_full_drive", default=False, action="store_true", help="Delete checkpoints when the drive is full.")
+    parser.add_argument("--detect_full_drive", default=True, action="store_true", help="Delete checkpoints when the drive is full.")
     parser.add_argument("--send_telegram_updates", default=False, action="store_true", help="Send Telegram updates.")
     parser.add_argument("--telegram_chat_id", type=str, default="0", help="Telegram chat ID.")
     parser.add_argument("--telegram_token", type=str, default="0", help="Telegram token.")
@@ -1379,26 +1379,31 @@ class CachedLatentsDataset(Dataset):
     def __getitem__(self, index):
         if index == 0:
             if len(self.cache_paths) > 1:
-                possible_indexes = list(range(0,len(self.cache_paths)-1))
+                possible_indexes_extension = None
+                possible_indexes = list(range(0,len(self.cache_paths)))
                 #conditional dropout is a percentage of images to drop from the total cache_paths
                 if self.conditional_dropout != None:
-                    if self.conditional_indexes == []:
-                        print(f" {bcolors.WARNING}Conditional dropout will drop {int(math.ceil(len(self.cache_paths) * self.conditional_dropout))} random batch's captions per epoch{bcolors.ENDC}")
-                        while len(self.conditional_indexes) < math.ceil(len(self.cache_paths) * self.conditional_dropout):
-                            picked_index = random.choice(possible_indexes)
-                            self.conditional_indexes.append(picked_index)
-                            possible_indexes.remove(picked_index)
+                    if len(self.conditional_indexes) == 0:
+                        self.conditional_indexes = random.sample(possible_indexes, k=int(math.ceil(len(possible_indexes)*self.conditional_dropout)))
                     else:
-                        past_indexes = self.conditional_indexes
-                        self.conditional_indexes = []
-                        #pick new indexes, but don't pick the same ones twice
-                        while len(self.conditional_indexes) < math.ceil(len(self.cache_paths) * self.conditional_dropout):
-                            picked_index = random.choice(possible_indexes)
-                            if picked_index in past_indexes:
-                                continue
-                            self.conditional_indexes.append(picked_index)
-                            possible_indexes.remove(picked_index)
-
+                        #pick indexes from the remaining possible indexes
+                        possible_indexes_extension = [i for i in possible_indexes if i not in self.conditional_indexes]
+                        #duplicate all values in possible_indexes_extension
+                        possible_indexes_extension = possible_indexes_extension + possible_indexes_extension
+                        possible_indexes_extension = possible_indexes_extension + self.conditional_indexes
+                        self.conditional_indexes = random.sample(possible_indexes_extension, k=int(math.ceil(len(possible_indexes)*self.conditional_dropout)))
+                        #check for duplicates in conditional_indexes values
+                        if len(self.conditional_indexes) != len(set(self.conditional_indexes)):
+                            #remove duplicates
+                            self.conditional_indexes_non_dupe = list(set(self.conditional_indexes))
+                            #add a random value from possible_indexes_extension for each duplicate
+                            for i in range(len(self.conditional_indexes) - len(self.conditional_indexes_non_dupe)):
+                                while True:
+                                    random_value = random.choice(possible_indexes_extension)
+                                    if random_value not in self.conditional_indexes_non_dupe:
+                                        self.conditional_indexes_non_dupe.append(random_value)
+                                        break
+                            self.conditional_indexes = self.conditional_indexes_non_dupe
         self.cache = torch.load(self.cache_paths[index])
         self.latents = self.cache.latents_cache[0]
         if index in self.conditional_indexes:
@@ -2094,21 +2099,34 @@ def main():
             height = aspect_ratio[0]
             width = aspect_ratio[1]
         if os.path.exists(args.output_dir):
-            if args.delete_checkpoints_when_full_drive==True:
+            if args.detect_full_drive==True:
                 folders = os.listdir(args.output_dir)
                 #check how much space is left on the drive
                 total, used, free = shutil.disk_usage("/")
                 if (free // (2**30)) < 4:
                     #folders.remove("0")
                     #get the folder with the lowest number
-                    oldest_folder = min(folder for folder in folders if folder.isdigit())
+                    #oldest_folder = min(folder for folder in folders if folder.isdigit())
+                    print(f"{bcolors.FAIL}Drive is almost full, Please make some space to continue training.{bcolors.ENDC}")
                     if args.send_telegram_updates:
                         try:
-                            send_telegram_message(f"Deleting folder <b>{oldest_folder}</b> because the drive is full", args.telegram_chat_id, args.telegram_token)
+                            send_telegram_message(f"Drive is almost full, Please make some space to continue training.", args.telegram_chat_id, args.telegram_token)
                         except:
                             pass
-                    oldest_folder_path = os.path.join(args.output_dir, oldest_folder)
-                    shutil.rmtree(oldest_folder_path)
+                    #count time
+                    import time
+                    start_time = time.time()
+                    import platform
+                    while input("Press Enter to continue... if you're on linux we'll wait 5 minutes for you to make space and continue"):
+                        #check if five minutes have passed
+                        #check if os is linux
+                        if 'Linux' in platform.platform():
+                            if time.time() - start_time > 300:
+                                break
+
+                    
+                    #oldest_folder_path = os.path.join(args.output_dir, oldest_folder)
+                    #shutil.rmtree(oldest_folder_path)
         # Create the pipeline using using the trained modules and save it.
         if accelerator.is_main_process:
             if 'step' in context:
