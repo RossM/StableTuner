@@ -2556,7 +2556,7 @@ def main():
                 
                 
 
-                if global_step > 0 and not global_step % args.sample_step_interval and epoch != 0:
+                if global_step > 0 and not global_step % args.sample_step_interval:
                     save_and_sample_weights(global_step,'step',save_model=False)
 
                 progress_bar.update(1)
