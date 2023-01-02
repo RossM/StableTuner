@@ -62,6 +62,12 @@ logger = get_logger(__name__)
 def parse_args():
     parser = argparse.ArgumentParser(description="Simple example of a training script.")
     parser.add_argument(
+        "--shuffle_per_epoch",
+        default=False,
+        action="store_true",
+        help="Will shffule the dataset per epoch",
+    )
+    parser.add_argument(
         "--attention",
         type=str,
         choices=["xformers", "flash_attention"],
@@ -1372,7 +1378,7 @@ class PromptDataset(Dataset):
 
 class CachedLatentsDataset(Dataset):
     #stores paths and loads latents on the fly
-    def __init__(self, cache_paths=(),batch_size=None,tokenizer=None,conditional_dropout=None,accelerator=None,dtype=None,model_variant='base'):
+    def __init__(self, cache_paths=(),batch_size=None,tokenizer=None,conditional_dropout=None,accelerator=None,dtype=None,model_variant='base',shuffle_per_epoch=False):
         self.cache_paths = cache_paths
         self.tokenizer = tokenizer
         self.empty_batch = [self.tokenizer('',padding="do_not_pad",truncation=True,max_length=self.tokenizer.model_max_length,).input_ids for i in range(batch_size)]
@@ -1381,10 +1387,13 @@ class CachedLatentsDataset(Dataset):
         self.conditional_dropout = conditional_dropout
         self.conditional_indexes = []
         self.model_variant = model_variant
+        self.shuffle_per_epoch = shuffle_per_epoch
     def __len__(self):
         return len(self.cache_paths)
     def __getitem__(self, index):
         if index == 0:
+            if self.shuffle_per_epoch == True:
+                self.cache_paths = tuple(random.sample(self.cache_paths, len(self.cache_paths)))
             if len(self.cache_paths) > 1:
                 possible_indexes_extension = None
                 possible_indexes = list(range(0,len(self.cache_paths)))
@@ -1870,7 +1879,8 @@ def main():
     tokenizer=tokenizer,
     conditional_dropout=args.conditional_dropout,
     accelerator=accelerator,dtype=weight_dtype,
-    model_variant=args.model_variant)
+    model_variant=args.model_variant,
+    shuffle_per_epoch=args.shuffle_per_epoch,)
 
     gen_cache = False
     data_len = len(train_dataloader)
@@ -2438,7 +2448,7 @@ def main():
             progress_bar_inter_epoch.set_description("Steps To Epoch")
             progress_bar_inter_epoch.reset(total=num_update_steps_per_epoch)
             for step, batch in enumerate(train_dataloader):
-                with accelerator.accumulate(unet), accelerator.accumulate(text_encoder):
+                with accelerator.accumulate(unet):
                     # Convert images to latent space
                     with torch.no_grad():
 
@@ -2546,7 +2556,7 @@ def main():
                 
                 
 
-                if global_step > 0 and not global_step % args.sample_step_interval:
+                if global_step > 0 and not global_step % args.sample_step_interval and epoch != 0:
                     save_and_sample_weights(global_step,'step',save_model=False)
 
                 progress_bar.update(1)
@@ -2580,7 +2590,8 @@ def main():
                     if epoch != 0:
                         save_and_sample_weights(epoch,'epoch')
                     else:
-                        save_and_sample_weights(epoch,'epoch',False)
+                        pass
+                        #save_and_sample_weights(epoch,'epoch',False)
                     print_instructions()
             if epoch % args.save_every_n_epoch and mid_checkpoint==True or mid_sample==True:
                 if mid_checkpoint==True:
