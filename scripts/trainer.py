@@ -356,7 +356,7 @@ def parse_args():
         "--mixed_precision",
         type=str,
         default="no",
-        choices=["no", "fp16", "bf16"],
+        choices=["no", "fp16", "bf16","tf32"],
         help=(
             "Whether to use mixed precision. Choose"
             "between fp16 and bf16 (bfloat16). Bf16 requires PyTorch >= 1.10."
@@ -1573,7 +1573,7 @@ def main():
 
     accelerator = Accelerator(
         gradient_accumulation_steps=args.gradient_accumulation_steps,
-        mixed_precision=args.mixed_precision,
+        mixed_precision=args.mixed_precision if args.mixed_precision != 'tf32' else 'no',
         log_with="tensorboard",
         logging_dir=logging_dir,
     )
@@ -1870,6 +1870,8 @@ def main():
     elif args.mixed_precision == "bf16":
         weight_dtype = torch.bfloat16
     elif args.mixed_precision == "no":
+        weight_dtype = torch.float32
+    elif args.mixed_precision == "tf32":
         weight_dtype = torch.float32
         torch.backends.cuda.matmul.allow_tf32 = True
         #torch.set_float32_matmul_precision("medium")
