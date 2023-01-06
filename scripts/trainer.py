@@ -495,7 +495,7 @@ ASPECTS_512 = [[512,512],      # 262144 1:1
 
 #failsafe aspects
 ASPECTS = ASPECTS_512
-def get_aspect_buckets(resolution,mode=None):
+def get_aspect_buckets(resolution,mode=''):
     if resolution < 512:
         raise ValueError("Resolution must be at least 512")
     try: 
@@ -1617,7 +1617,7 @@ def main():
                     pipeline = DiffusionPipeline.from_pretrained(
                         args.pretrained_model_name_or_path,
                         safety_checker=None,
-                        vae=AutoencoderKL.from_pretrained(args.pretrained_vae_name_or_path or args.pretrained_model_name_or_path,subfolder=None if args.pretrained_vae_name_or_path else "vae" ),
+                        vae=AutoencoderKL.from_pretrained(args.pretrained_vae_name_or_path or args.pretrained_model_name_or_path,subfolder=None if args.pretrained_vae_name_or_path else "vae" ,safe_serialization=True),
                         torch_dtype=torch_dtype,
                          
                     )
@@ -1645,7 +1645,7 @@ def main():
                         sample_dataloader, desc="Generating class images", disable=not accelerator.is_local_main_process
                     ):
                         with torch.autocast("cuda"):
-                            images = pipeline(example["prompt"]).images
+                            images = pipeline(example["prompt"],height=args.resolution,width=args.resolution).images
                         for i, image in enumerate(images):
                             hash_image = hashlib.sha1(image.tobytes()).hexdigest()
                             image_filename = class_images_dir / f"{example['index'][i] + cur_class_images}-{hash_image}.jpg"
@@ -1654,7 +1654,7 @@ def main():
         del pipeline
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
-
+            torch.cuda.ipc_collect()
     # Load the tokenizer
     if args.tokenizer_name:
         tokenizer = CLIPTokenizer.from_pretrained(args.tokenizer_name )
@@ -1666,7 +1666,7 @@ def main():
     #text_encoder = CLIPTextModel.from_pretrained(args.pretrained_model_name_or_path, subfolder="text_encoder" )
     text_encoder_cls = tu.import_model_class_from_model_name_or_path(args.pretrained_model_name_or_path, None)
     text_encoder = text_encoder_cls.from_pretrained(args.pretrained_model_name_or_path, subfolder="text_encoder" )
-    vae = AutoencoderKL.from_pretrained(args.pretrained_model_name_or_path, subfolder="vae" )
+    vae = AutoencoderKL.from_pretrained(args.pretrained_vae_name_or_path or args.pretrained_model_name_or_path,subfolder=None if args.pretrained_vae_name_or_path else "vae" )
     unet = UNet2DConditionModel.from_pretrained(args.pretrained_model_name_or_path, subfolder="unet" )
     if is_xformers_available() and args.attention=='xformers':
         try:
@@ -1922,6 +1922,7 @@ def main():
             del text_encoder
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
+            torch.cuda.ipc_collect()
         #load all the cached latents into a single dataset
         for i in range(0,data_len-1):
             cached_dataset.add_pt_cache(os.path.join(latent_cache_dir,f"latents_cache_{i}.pt"))
@@ -1971,6 +1972,7 @@ def main():
             del text_encoder
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
+            torch.cuda.ipc_collect()
         #load all the cached latents into a single dataset
     train_dataloader = torch.utils.data.DataLoader(cached_dataset, batch_size=1, collate_fn=lambda x: x, shuffle=False)
     print(f" {bcolors.OKGREEN}Latents are ready.{bcolors.ENDC}")
@@ -2056,7 +2058,7 @@ def main():
             args.pretrained_model_name_or_path,
             unet=unwrapped_unet,
             text_encoder=text_enc_model,
-            vae=AutoencoderKL.from_pretrained(args.pretrained_vae_name_or_path or args.pretrained_model_name_or_path,subfolder=None if args.pretrained_vae_name_or_path else "vae" ),
+            vae=AutoencoderKL.from_pretrained(args.pretrained_vae_name_or_path or args.pretrained_model_name_or_path,subfolder=None if args.pretrained_vae_name_or_path else "vae", safe_serialization=True),
             safety_checker=None,
             torch_dtype=weight_dtype,
             local_files_only=False,
@@ -2217,7 +2219,7 @@ def main():
                     args.pretrained_model_name_or_path,
                     unet=unwrapped_unet,
                     text_encoder=text_enc_model,
-                    vae=AutoencoderKL.from_pretrained(args.pretrained_vae_name_or_path or args.pretrained_model_name_or_path,subfolder=None if args.pretrained_vae_name_or_path else "vae" ),
+                    vae=AutoencoderKL.from_pretrained(args.pretrained_vae_name_or_path or args.pretrained_model_name_or_path,subfolder=None if args.pretrained_vae_name_or_path else "vae",),
                     safety_checker=None,
                     torch_dtype=weight_dtype,
                     local_files_only=False,
@@ -2325,13 +2327,15 @@ def main():
                     del unwrapped_unet
                     if torch.cuda.is_available():
                         torch.cuda.empty_cache()
+                        torch.cuda.ipc_collect()
                 if save_model == True:
                     print(f"{bcolors.OKGREEN}Weights saved to {save_dir}{bcolors.ENDC}")
                 elif save_model == False and len(imgs) > 0:
                     del imgs
                     print(f"{bcolors.OKGREEN}Samples saved to {sample_dir}{bcolors.ENDC}")
-        except:
-            print(f"{bcolors.FAIL}Error occured during sampling, skipping.{bcolors.ENDC}")
+        except Exception as e:
+            print(e)
+            print(f"{bcolors.FAIL} Error occured during sampling, skipping.{bcolors.ENDC}")
             pass
 
     # Only show the progress bar once on each machine.

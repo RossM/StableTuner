@@ -650,10 +650,12 @@ class CreateToolTip(object):
 class App(ctk.CTk):    
     def __init__(self):
         super().__init__()
-
-        latest_git_hash = subprocess.check_output(["git", "describe", "--always"], cwd=Path(__file__).resolve().parent).strip().decode()
-        #check if configs folder exists
-        print("Latest git hash: " + latest_git_hash)
+        try:
+            latest_git_hash = subprocess.check_output(["git", "ls-remote", "http://github.com/devilismyfriend/StableTuner.git","main"], cwd=Path(__file__).resolve().parent).strip().decode()[0:7]
+            #check if configs folder exists
+            print("Latest git hash: " + latest_git_hash)
+        except:
+            pass
         if not os.path.exists("configs"):
             os.makedirs("configs")
         
@@ -683,10 +685,13 @@ class App(ctk.CTk):
             #read stableTuner.cfg
             with open("configs/stableTuner_hash.cfg", "r") as f:
                 old_git_hash = f.read()
-            #check if the latest git hash is the same as the one in stableTuner.cfg
-            if latest_git_hash != old_git_hash:
-                #if not the same, delete the old stableTuner.cfg and create a new one with the latest git hash
-                self.update_available = True
+            try:
+                #check if the latest git hash is the same as the one in stableTuner.cfg
+                if latest_git_hash != old_git_hash:
+                    #if not the same, delete the old stableTuner.cfg and create a new one with the latest git hash
+                    self.update_available = True
+            except:
+                self.update_available = False
         self.sidebar_frame = ctk.CTkFrame(self, width=140, corner_radius=0)
         self.sidebar_frame.grid(row=0, column=0, rowspan=10, sticky="nsew")
         self.logo_img = ctk.CTkImage(Image.open("resources/stableTuner_logo.png").resize((300, 300), Image.Resampling.LANCZOS),size=(80,80))
@@ -716,7 +721,7 @@ class App(ctk.CTk):
         #empty label
         
         if self.update_available:
-            self.sidebar_button_11 = ctk.CTkButton(self.sidebar_frame,text='Update Available',fg_color='red',command=self.update_ST)
+            self.sidebar_button_11 = ctk.CTkButton(self.sidebar_frame,text='Update Available',fg_color='red',hover_color='darkred',command=self.update_ST)
             self.sidebar_button_11.grid(row=12, column=0, padx=20, pady=5)
         else:
             self.empty_label = ctk.CTkLabel(self.sidebar_frame, text="", font=ctk.CTkFont(size=20, weight="bold"))
@@ -1433,7 +1438,7 @@ class App(ctk.CTk):
         #self.gradient_accumulation_steps_label.grid(row=8, column=0, sticky="nsew")
         self.gradient_accumulation_steps_var = tk.StringVar()
         self.gradient_accumulation_steps_var.set(self.accumulation_steps)
-        self.gradient_accumulation_steps_dropdown = ctk.CTkOptionMenu(self.training_frame_subframe, variable=self.gradient_accumulation_steps_var, values=['0','1','2','3','4','5','6','7','8','9','10'])
+        self.gradient_accumulation_steps_dropdown = ctk.CTkOptionMenu(self.training_frame_subframe, variable=self.gradient_accumulation_steps_var, values=['1','2','3','4','5','6','7','8','9','10'])
         #self.gradient_accumulation_steps_dropdown.grid(row=8, column=1, sticky="nsew")
         #create learning rate dark mode entry
         self.learning_rate_label = ctk.CTkLabel(self.training_frame_subframe, text="Learning Rate")
@@ -1983,6 +1988,8 @@ class App(ctk.CTk):
                     else:
                         
                         newest_dirs = sorted(glob.iglob(last_output_path + os.sep + '*'), key=os.path.getctime, reverse=True)
+                        #remove anything that is not a dir
+                        newest_dirs = [x for x in newest_dirs if os.path.isdir(x)]
                         #sort newest_dirs by date
                         for newest_dir in newest_dirs:
                             #check if the newest dir has all the required folders
@@ -1995,6 +2002,7 @@ class App(ctk.CTk):
                 else:
                         
                         newest_dirs = sorted(glob.iglob(last_output_path + os.sep + '*'), key=os.path.getctime, reverse=True)
+                        newest_dirs = [x for x in newest_dirs if os.path.isdir(x)]
                         #sort newest_dirs by date
                         for newest_dir in newest_dirs:
                             #check if the newest dir has all the required folders
@@ -2010,7 +2018,7 @@ class App(ctk.CTk):
             return
     def update_ST(self):
         #git
-        new_version = subprocess.check_output(["git", "describe", "--always"], cwd=Path(__file__).resolve().parent).strip().decode()
+        new_version = subprocess.check_output(["git", "ls-remote", "http://github.com/devilismyfriend/StableTuner.git","main"], cwd=Path(__file__).resolve().parent).strip().decode()[0:7]
         #open the stabletuner_hash.cfg file
         #update the stabletuner_hash.cfg file
         with open("configs/stabletuner_hash.cfg", "w") as f:
@@ -2018,8 +2026,8 @@ class App(ctk.CTk):
         #update the stabletuner
         #self.update_stabletuner()
         #git pull and wait for it to finish
-        subprocess.run(["git", "fetch"], cwd=Path(__file__).resolve().parent)
-        print('feteched')
+        subprocess.run(["git", "pull"], cwd=Path(__file__).resolve().parent)
+        print('pulled')
         #restart the app
         restart(self)
     def packageForCloud(self):
@@ -2646,7 +2654,12 @@ class App(ctk.CTk):
     
     def get_sd_version(self,file_path):
             import torch
-            checkpoint = torch.load(file_path)
+            if 'ckpt' in file_path:
+                checkpoint = torch.load(file_path, map_location="cpu")
+            else:
+                from safetensors.torch import load_file
+                checkpoint = load_file(file_path)
+            #checkpoint = torch.load(file_path)
             answer = messagebox.askyesno("V-Model?", "Is this model using V-Parameterization? (based on SD2.x 768 model)")
             if answer == True:
                 prediction = "vprediction"
@@ -2681,7 +2694,7 @@ class App(ctk.CTk):
                     return
                 file_path = model_dir
             #if the file is not a model index file
-        if file_path.endswith(".ckpt"):
+        if file_path.endswith(".ckpt") or file_path.endswith(".safetensors"):
             sd_file = file_path
             version, prediction = self.get_sd_version(sd_file)
             #create a directory under the models folder with the name of the ckpt file
@@ -2721,10 +2734,6 @@ class App(ctk.CTk):
                 self.convert_model_dialog.destroy()
 
                 file_path = model_path
-        if file_path.endswith(".safetensors"):
-            #raise not implemented error
-            raise NotImplementedError("The selected file is a safetensors file. This file type is not supported yet.")
-            file_path = ''
         self.input_model_path_entry.delete(0, tk.END)
         self.input_model_path_entry.insert(0, file_path)
     
@@ -3342,27 +3351,27 @@ class App(ctk.CTk):
                 batBase += ' --use_text_files_as_captions'
             else:
                 batBase += ' "--use_text_files_as_captions" '
-        if self.sample_step_interval != '0' or self.sample_step_interval != '' or self.sample_step_interval != ' ':
+        if int(self.sample_step_interval) != 0 or self.sample_step_interval != '' or self.sample_step_interval != ' ':
             if export == 'Linux':
                 batBase += f' --sample_step_interval={self.sample_step_interval}'
             else:
                 batBase += f' "--sample_step_interval={self.sample_step_interval}" '
-            try:
-                #if limit_text_encoder is a percentage calculate what epoch to stop at
-                if '%' in self.limit_text_encoder:
-                    percent = float(self.limit_text_encoder.replace('%',''))
-                    stop_epoch = int((int(self.train_epocs) * percent) / 100)
-                    if export == 'Linux':
-                        batBase += f' --stop_text_encoder_training={stop_epoch}'
-                    else:
-                        batBase += f' "--stop_text_encoder_training={stop_epoch}" '
-                elif '%' not in self.limit_text_encoder and self.limit_text_encoder != '' and self.limit_text_encoder != ' ' and self.limit_text_encoder != '0':
-                    if export == 'Linux':
-                        batBase += f' --stop_text_encoder_training={self.limit_text_encoder}'
-                    else:
-                        batBase += f' "--stop_text_encoder_training={self.limit_text_encoder}" '
-            except:
-                pass
+        try:
+            #if limit_text_encoder is a percentage calculate what epoch to stop at
+            if '%' in self.limit_text_encoder:
+                percent = float(self.limit_text_encoder.replace('%',''))
+                stop_epoch = int((int(self.train_epocs) * percent) / 100)
+                if export == 'Linux':
+                    batBase += f' --stop_text_encoder_training={stop_epoch}'
+                else:
+                    batBase += f' "--stop_text_encoder_training={stop_epoch}" '
+            elif '%' not in self.limit_text_encoder and self.limit_text_encoder != '' and self.limit_text_encoder != ' ' and self.limit_text_encoder != '0':
+                if export == 'Linux':
+                    batBase += f' --stop_text_encoder_training={self.limit_text_encoder}'
+                else:
+                    batBase += f' "--stop_text_encoder_training={self.limit_text_encoder}" '
+        except:
+            pass
         if export=='Linux':
             batBase += f' --pretrained_model_name_or_path="{self.model_path}" '
             batBase += f' --pretrained_vae_name_or_path="{self.vae_path}" '
