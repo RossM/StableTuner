@@ -109,7 +109,7 @@ def parse_args():
         )
     parser.add_argument(
         "--flatten_sample_folder",
-        default=False,
+        default=True,
         action="store_true",
         help="Will save samples in one folder instead of per-epoch",
     )
