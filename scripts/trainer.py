@@ -657,6 +657,7 @@ def main():
                 revision=args.revision,
             )
         else:
+            print(f" {bcolors.WARNING}Discriminator network (GAN) not found. Initializing a new network.{bcolors.ENDC}")
             discriminator = Discriminator()
     
     if is_xformers_available() and args.attention=='xformers':
@@ -1657,7 +1658,7 @@ def main():
                             
                     if args.use_gan:
                         # Add loss from the GAN
-                        pred_fake = discriminator(torch.cat((noisy_latents.float(), model_pred.float()), 1)).mean([1,2,3])
+                        pred_fake = discriminator(torch.cat((noisy_latents, model_pred), 1)).mean([1,2,3])
                         loss += 0.2 * F.mse_loss(pred_fake, torch.ones_like(pred_fake), reduction="mean")
                         pred_fake = None
                             
