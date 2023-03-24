@@ -29,11 +29,14 @@ import torch
 import torch.nn.functional as F
 import torch.utils.checkpoint
 import numpy as np
+import einops, einops.layers.torch
 from accelerate import Accelerator
 from accelerate.logging import get_logger
 from accelerate.utils import set_seed
 from diffusers import AutoencoderKL, DDIMScheduler, DDPMScheduler, DiffusionPipeline, UNet2DConditionModel,DiffusionPipeline, DPMSolverMultistepScheduler,EulerDiscreteScheduler
 from diffusers.optimization import get_scheduler
+from diffusers.modeling_utils import ModelMixin
+from diffusers.configuration_utils import ConfigMixin
 from torchvision.transforms import functional
 from tqdm.auto import tqdm
 from transformers import CLIPTextModel, CLIPTokenizer
@@ -392,12 +395,123 @@ def parse_args():
     parser.add_argument("--unmasked_probability", type=float, default=1, required=False, help="Probability of training a step without a mask")
     parser.add_argument("--max_denoising_strength", type=float, default=1, required=False, help="Max denoising steps to train on")
     parser.add_argument('--add_mask_prompt', type=str, default=None, action="append", dest="mask_prompts", help="Prompt for automatic mask creation")
+    parser.add_argument('--use_gan', default=False, action="store_true", help="Use GAN (experimental)")
     args = parser.parse_args()
     env_local_rank = int(os.environ.get("LOCAL_RANK", -1))
     if env_local_rank != -1 and env_local_rank != args.local_rank:
         args.local_rank = env_local_rank
 
     return args
+    
+def Downsample(dim, dim_out):
+    return torch.nn.Conv2d(dim, dim_out, 4, 2, 1)
+
+class Residual(torch.nn.Sequential):
+    def forward(self, input):
+        x = input
+        for module in self:
+            x = module(x)
+        return x + input
+
+def Block(dim, dim_out, *, kernel_size=3, groups=8):
+    return torch.nn.Sequential(
+        torch.nn.Conv2d(dim, dim_out, kernel_size=kernel_size, padding=kernel_size//2),
+        torch.nn.GroupNorm(groups, dim_out),
+        torch.nn.SiLU(),
+    )
+
+def ResnetBlock(dim, *, kernel_size=3, groups=8):
+    return Residual(
+        Block(dim, dim, kernel_size=kernel_size, groups=groups),
+        Block(dim, dim, kernel_size=kernel_size, groups=groups),
+    )
+    
+class SelfAttention(torch.nn.Module):
+    def __init__(self, dim, out_dim, *, heads=4, key_dim=32, value_dim=32):
+        super().__init__()
+        self.dim = dim
+        self.out_dim = dim
+        self.heads = heads
+        self.key_dim = key_dim
+
+        self.to_k = torch.nn.Linear(dim, key_dim)
+        self.to_v = torch.nn.Linear(dim, value_dim)
+        self.to_q = torch.nn.Linear(dim, key_dim * heads)
+        self.to_out = torch.nn.Linear(value_dim * heads, out_dim)
+
+    def forward(self, x):
+        shape = x.shape
+        x = einops.rearrange(x, 'b c ... -> b (...) c')
+
+        k = self.to_k(x)
+        v = self.to_v(x)
+        q = self.to_q(x)
+        q = einops.rearrange(q, 'b n (h c) -> b (n h) c', h=self.heads)
+        #result = torch.nn.functional.scaled_dot_product_attention(q, k, v)
+        attention_scores = torch.bmm(q, k.transpose(-2, -1))
+        attention_probs = torch.softmax(attention_scores.float() / math.sqrt(self.key_dim), dim=-1).type(attention_scores.dtype)
+        result = torch.bmm(attention_probs, v)
+        result = einops.rearrange(result, 'b (n h) c -> b n (h c)', h=self.heads)
+        out = self.to_out(result)
+
+        out = einops.rearrange(out, 'b n c -> b c n')
+        out = torch.reshape(out, (shape[0], self.out_dim, *shape[2:]))
+        return out
+
+def SelfAttentionBlock(dim, attention_dim, *, heads=8, groups=8):
+    return Residual(
+        torch.nn.GroupNorm(groups, dim),
+        SelfAttention(dim, dim, heads=heads, key_dim=attention_dim, value_dim=attention_dim),
+    )
+    
+class Discriminator(ModelMixin, ConfigMixin):
+    """
+    This is a very simple discriminator architecture. It doesn't take any conditioning,
+    not even the time step.
+    """
+
+    def __init__(self, dim=128, attention_dim=64):
+        super().__init__()
+        self.model = torch.nn.Sequential(
+            torch.nn.Conv2d(8, dim, 7, padding=3),
+            ResnetBlock(dim),
+            ResnetBlock(dim),
+            Downsample(dim, dim*2),
+            SelfAttentionBlock(dim*2, attention_dim),
+            ResnetBlock(dim*2),
+            ResnetBlock(dim*2),
+            Downsample(dim*2, dim*4),
+            SelfAttentionBlock(dim*4, attention_dim),
+            ResnetBlock(dim*4),
+            ResnetBlock(dim*4),
+            Downsample(dim*4, dim*8),
+            SelfAttentionBlock(dim*8, attention_dim),
+            ResnetBlock(dim*8),
+            ResnetBlock(dim*8),
+            SelfAttentionBlock(dim*8, attention_dim),
+            ResnetBlock(dim*8),
+            ResnetBlock(dim*8),
+            SelfAttentionBlock(dim*8, attention_dim),
+            torch.nn.Conv2d(dim*8, dim*8, 1),
+            torch.nn.GroupNorm(8, dim*8),
+            torch.nn.SiLU(),
+            torch.nn.Conv2d(dim*8, 1, 1),
+            #einops.layers.torch.Reduce('b c h w -> b', 'mean'),
+        )
+        
+        self.gradient_checkpointing = False
+    
+    def enable_gradient_checkpointing(self):
+        self.gradient_checkpointing = True
+        
+    def disable_gradient_checkpointing(self):
+        self.gradient_checkpointing = False
+        
+    def forward(self, x):
+        if self.gradient_checkpointing:
+            return torch.utils.checkpoint.checkpoint_sequential(self.model, 10, x)
+        else:
+            return self.model(x)
 
 def main():
     print(f" {bcolors.OKBLUE}Booting Up StableTuner{bcolors.ENDC}") 
@@ -535,10 +649,22 @@ def main():
         torch_dtype=torch.float32
     )
     
+    if args.use_gan:
+        if os.path.isdir(os.path.join(args.pretrained_model_name_or_path, "discriminator")):
+            discriminator = Discriminator.from_pretrained(
+                args.pretrained_model_name_or_path,
+                subfolder="discriminator",
+                revision=args.revision,
+            )
+        else:
+            discriminator = Discriminator()
+    
     if is_xformers_available() and args.attention=='xformers':
         try:
             vae.enable_xformers_memory_efficient_attention()
             unet.enable_xformers_memory_efficient_attention()
+            if args.use_gan:
+                discriminator.enable_xformers_memory_efficient_attention()
         except Exception as e:
             logger.warning(
                 "Could not enable memory efficient attention. Make sure xformers is installed"
@@ -559,6 +685,8 @@ def main():
         unet.enable_gradient_checkpointing()
         if args.train_text_encoder:
             text_encoder.gradient_checkpointing_enable()
+        if args.use_gan:
+            discriminator.enable_gradient_checkpointing()
 
     if args.scale_lr:
         args.learning_rate = (
@@ -599,6 +727,14 @@ def main():
             weight_decay=args.adam_weight_decay,
             eps=args.adam_epsilon,
         )
+        if args.use_gan:
+            optimizer_discriminator = optimizer_class(
+                discriminator.parameters(),
+                lr=args.learning_rate,
+                betas=(args.adam_beta1, args.adam_beta2),
+                weight_decay=args.adam_weight_decay,
+                eps=args.adam_epsilon,
+            )            
     else:
         optimizer = optimizer_class(
             params_to_optimize,
@@ -607,6 +743,14 @@ def main():
             weight_decay=args.adam_weight_decay,
             #eps=args.adam_epsilon,
         )
+        if args.use_gan:
+            optimizer_discriminator = optimizer_class(
+                discriminator.parameters(),
+                lr=args.learning_rate,
+                betas=(args.adam_beta1, args.adam_beta2),
+                weight_decay=args.adam_weight_decay,
+                #eps=args.adam_epsilon,
+            )
     noise_scheduler = DDPMScheduler.from_config(args.pretrained_model_name_or_path, subfolder="scheduler")
 
     if args.use_bucketing:
@@ -884,6 +1028,8 @@ def main():
         unet, optimizer, train_dataloader, lr_scheduler = accelerator.prepare(
             unet, optimizer, train_dataloader, lr_scheduler
         )
+    if args.use_gan:
+        discriminator, optimizer_discriminator = accelerator.prepare(discriminator, optimizer_discriminator)
 
     # We need to recalculate our total training steps as the size of the training dataloader may have changed.
     num_update_steps_per_epoch = len(train_dataloader)
@@ -1114,6 +1260,8 @@ def main():
                 if step != 0:
                     if save_model:
                         pipeline.save_pretrained(save_dir,safe_serialization=True)
+                        if args.use_gan:
+                            discriminator.save_pretrained(f"{save_dir}/discriminator",safe_serialization=True)
                         with open(os.path.join(save_dir, "args.json"), "w") as f:
                                 json.dump(args.__dict__, f, indent=2)
                     if args.stop_text_encoder_training == True:
@@ -1444,6 +1592,28 @@ def main():
                         target = noise_scheduler.get_velocity(latents, noise, timesteps)
                     else:
                         raise ValueError(f"Unknown prediction type {noise_scheduler.config.prediction_type}")
+                    
+                    # GAN stuff
+                    # Input: noisy_latents
+                    # True output: target
+                    # Fake output: model_pred
+
+                    if args.use_gan:
+                        # Turn on learning for the discriminator, and do an optimization step
+                        for param in discriminator.parameters():
+                            param.requires_grad = True
+                        pred_fake = discriminator(torch.cat((noisy_latents, model_pred), 1).detach()).mean([1,2,3])
+                        pred_real = discriminator(torch.cat((noisy_latents, target), 1)).mean([1,2,3])
+                        discriminator_loss = F.mse_loss(pred_fake, torch.zeros_like(pred_fake), reduction="mean") + F.mse_loss(pred_real, torch.ones_like(pred_real), reduction="mean")
+                        accelerator.backward(discriminator_loss)
+                        optimizer_discriminator.step()
+                        optimizer_discriminator.zero_grad()
+                        pred_real = pred_fake = None
+                        
+                        # Turn off learning for the discriminator for the generator optimization step
+                        for param in discriminator.parameters():
+                            param.requires_grad = False
+                    
                     if args.with_prior_preservation:
                         # Chunk the noise and noise_pred into two parts and compute the loss on each part separately.
                         """
@@ -1484,6 +1654,13 @@ def main():
 
                         if mask is not None and args.normalize_masked_area_loss:
                             loss = loss / mask_mean
+                            
+                    if args.use_gan:
+                        # Add loss from the GAN
+                        pred_fake = discriminator(torch.cat((noisy_latents.float(), model_pred.float()), 1)).mean([1,2,3])
+                        loss += 0.2 * F.mse_loss(pred_fake, torch.ones_like(pred_fake), reduction="mean")
+                        pred_fake = None
+                            
                     accelerator.backward(loss)
                     if accelerator.sync_gradients:
                         params_to_clip = (
