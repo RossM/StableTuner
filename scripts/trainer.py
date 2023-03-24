@@ -396,7 +396,7 @@ def parse_args():
     parser.add_argument("--max_denoising_strength", type=float, default=1, required=False, help="Max denoising steps to train on")
     parser.add_argument('--add_mask_prompt', type=str, default=None, action="append", dest="mask_prompts", help="Prompt for automatic mask creation")
     parser.add_argument('--use_gan', default=True, action="store_true", help="Use GAN (experimental)")
-    parser.add_argument("--gan_strength", type=float, default=0.2, required=False, help="Strength of effect GAN has on training")
+    parser.add_argument("--gan_strength", type=float, default=0.05, required=False, help="Strength of effect GAN has on training")
     args = parser.parse_args()
     env_local_rank = int(os.environ.get("LOCAL_RANK", -1))
     if env_local_rank != -1 and env_local_rank != args.local_rank:
