@@ -1677,6 +1677,8 @@ def main():
                     loss_avg.update(loss.detach_(), bsz)
                     if args.use_ema == True:
                         ema_unet.step(unet.parameters())
+                        
+                    loss = model_pred = model_pred_prior = None
 
                 if not global_step % args.log_interval:
                     logs = {"loss": loss_avg.avg.item(), "lr": lr_scheduler.get_last_lr()[0]}
