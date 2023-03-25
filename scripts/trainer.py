@@ -1227,7 +1227,7 @@ def main():
                 #scheduler = EulerDiscreteScheduler.from_pretrained(args.pretrained_model_name_or_path, subfolder="scheduler", prediction_type="v_prediction")
                 scheduler = DPMSolverMultistepScheduler.from_pretrained(args.pretrained_model_name_or_path, subfolder="scheduler")
                 unwrapped_unet = accelerator.unwrap_model(unet,True)
-                if args.use_ema:
+                if args.use_ema and save_model:
                     ema_unet.copy_to(unwrapped_unet.parameters())
                     
                 pipeline = DiffusionPipeline.from_pretrained(
