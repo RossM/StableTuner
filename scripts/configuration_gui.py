@@ -891,6 +891,8 @@ class App(ctk.CTk):
         self.shuffle_captions = False
         self.use_offset_noise = False
         self.offset_noise_weight = 0.1
+        self.use_gan = False
+        self.gan_weight = 0.05
         self.num_samples_to_generate = 1
         self.auto_balance_concept_datasets = False
         self.sample_width = 512
@@ -1610,6 +1612,23 @@ class App(ctk.CTk):
         self.offset_noise_weight_entry = ctk.CTkEntry(self.training_frame_finetune_subframe)
         self.offset_noise_weight_entry.grid(row=20, column=3, sticky="w")
         self.offset_noise_weight_entry.insert(0, self.offset_noise_weight)
+
+        # GAN training
+        self.use_gan_var = tk.IntVar()
+        self.use_gan_var.set(self.use_gan)
+        #create label
+        self.gan_label = ctk.CTkLabel(self.training_frame_finetune_subframe, text="With GAN")
+        gan_label_ttp = CreateToolTip(self.gan_label, "Use GAN (experimental).")
+        #create checkbox
+        self.gan_checkbox = ctk.CTkSwitch(self.training_frame_finetune_subframe, variable=self.use_gan_var)
+        self.gan_checkbox.grid(row=21, column=1, sticky="nsew")
+        #create GAN weight entry
+        self.gan_weight_label = ctk.CTkLabel(self.training_frame_finetune_subframe, text="GAN Weight")
+        gan_weight_label_ttp = CreateToolTip(self.gan_weight_label, "The weight of the GAN.")
+        self.gan_weight_label.grid(row=21, column=1, sticky="e")
+        self.gan_weight_entry = ctk.CTkEntry(self.training_frame_finetune_subframe)
+        self.gan_weight_entry.grid(row=21, column=3, sticky="w")
+        self.gan_weight_entry.insert(0, self.gan_weight)
         
 
     def create_dataset_settings_widgets(self):
@@ -3122,6 +3141,8 @@ class App(ctk.CTk):
         configure['shuffle_dataset_per_epoch'] = self.shuffle_dataset_per_epoch_var.get()
         configure['use_offset_noise'] = self.use_offset_noise_var.get()
         configure['offset_noise_weight'] = self.offset_noise_weight_entry.get()
+        configure['use_gan'] = self.use_gan_var.get()
+        configure['gan_weight'] = self.gan_weight_entry.get()
         configure['use_lion'] = self.use_lion_var.get()
         #save the configure file
         #if the file exists, delete it
@@ -3279,6 +3300,9 @@ class App(ctk.CTk):
         self.use_offset_noise_var.set(configure["use_offset_noise"])
         self.offset_noise_weight_entry.delete(0, tk.END)
         self.offset_noise_weight_entry.insert(0, configure["offset_noise_weight"])
+        self.use_gan_var.set(configure["use_gan"])
+        self.gan_weight_entry.delete(0, tk.END)
+        self.gan_weight_entry.insert(0, configure["gan_weight"])
         self.use_lion_var.set(configure["use_lion"])
         self.update()
     
@@ -3352,6 +3376,8 @@ class App(ctk.CTk):
         self.shuffle_dataset_per_epoch = self.shuffle_dataset_per_epoch_var.get()
         self.use_offset_noise = self.use_offset_noise_var.get()
         self.offset_noise_weight = self.offset_noise_weight_entry.get()
+        self.use_gan = self.use_gan_var.get()
+        self.gan_weight = self.gan_weight_entry.get()
         self.use_lion = self.use_lion_var.get()
         mode = 'normal'
         if self.cloud_mode == False and export == None:
@@ -3657,6 +3683,13 @@ class App(ctk.CTk):
             else:
                 batBase += f' "--with_offset_noise" '
                 batBase += f' "--offset_noise_weight={self.offset_noise_weight}" '
+        if self.use_gan == True:
+            if export == 'Linux':
+                batBase += f' --with_gan'
+                batBase += f' --gan_weight={self.gan_weight}'
+            else:
+                batBase += f' "--with_gan" '
+                batBase += f' "--gan_weight={self.gan_weight}" '
         if self.auto_balance_concept_datasets == True:
             if export == 'Linux':
                 batBase += ' --auto_balance_concept_datasets'
