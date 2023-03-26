@@ -395,7 +395,7 @@ def parse_args():
     parser.add_argument("--unmasked_probability", type=float, default=1, required=False, help="Probability of training a step without a mask")
     parser.add_argument("--max_denoising_strength", type=float, default=1, required=False, help="Max denoising steps to train on")
     parser.add_argument('--add_mask_prompt', type=str, default=None, action="append", dest="mask_prompts", help="Prompt for automatic mask creation")
-    parser.add_argument('--use_gan', default=False, action="store_true", help="Use GAN (experimental)")
+    parser.add_argument('--with_gan', default=False, action="store_true", help="Use GAN (experimental)")
     parser.add_argument("--gan_weight", type=float, default=0.2, required=False, help="Strength of effect GAN has on training")
     args = parser.parse_args()
     env_local_rank = int(os.environ.get("LOCAL_RANK", -1))
@@ -650,7 +650,7 @@ def main():
         torch_dtype=torch.float32
     )
     
-    if args.use_gan:
+    if args.with_gan:
         if os.path.isdir(os.path.join(args.pretrained_model_name_or_path, "discriminator")):
             discriminator = Discriminator.from_pretrained(
                 args.pretrained_model_name_or_path,
@@ -665,7 +665,7 @@ def main():
         try:
             vae.enable_xformers_memory_efficient_attention()
             unet.enable_xformers_memory_efficient_attention()
-            if args.use_gan:
+            if args.with_gan:
                 discriminator.enable_xformers_memory_efficient_attention()
         except Exception as e:
             logger.warning(
@@ -687,7 +687,7 @@ def main():
         unet.enable_gradient_checkpointing()
         if args.train_text_encoder:
             text_encoder.gradient_checkpointing_enable()
-        if args.use_gan:
+        if args.with_gan:
             discriminator.enable_gradient_checkpointing()
 
     if args.scale_lr:
@@ -729,7 +729,7 @@ def main():
             weight_decay=args.adam_weight_decay,
             eps=args.adam_epsilon,
         )
-        if args.use_gan:
+        if args.with_gan:
             optimizer_discriminator = optimizer_class(
                 discriminator.parameters(),
                 lr=args.learning_rate,
@@ -745,7 +745,7 @@ def main():
             weight_decay=args.adam_weight_decay,
             #eps=args.adam_epsilon,
         )
-        if args.use_gan:
+        if args.with_gan:
             optimizer_discriminator = optimizer_class(
                 discriminator.parameters(),
                 lr=args.learning_rate,
@@ -1030,7 +1030,7 @@ def main():
         unet, optimizer, train_dataloader, lr_scheduler = accelerator.prepare(
             unet, optimizer, train_dataloader, lr_scheduler
         )
-    if args.use_gan:
+    if args.with_gan:
         discriminator, optimizer_discriminator = accelerator.prepare(discriminator, optimizer_discriminator)
 
     # We need to recalculate our total training steps as the size of the training dataloader may have changed.
@@ -1262,7 +1262,7 @@ def main():
                 if step != 0:
                     if save_model:
                         pipeline.save_pretrained(save_dir,safe_serialization=True)
-                        if args.use_gan:
+                        if args.with_gan:
                             discriminator.save_pretrained(f"{save_dir}/discriminator",safe_serialization=True)
                         with open(os.path.join(save_dir, "args.json"), "w") as f:
                                 json.dump(args.__dict__, f, indent=2)
@@ -1600,7 +1600,7 @@ def main():
                     # True output: target
                     # Fake output: model_pred
 
-                    if args.use_gan:
+                    if args.with_gan:
                         # Turn on learning for the discriminator, and do an optimization step
                         for param in discriminator.parameters():
                             param.requires_grad = True
@@ -1657,7 +1657,7 @@ def main():
                         if mask is not None and args.normalize_masked_area_loss:
                             loss = loss / mask_mean
                             
-                    if args.use_gan:
+                    if args.with_gan:
                         # Add loss from the GAN
                         pred_fake = discriminator(torch.cat((noisy_latents, model_pred), 1)).mean([1,2,3])
                         loss += args.gan_weight * F.mse_loss(pred_fake, torch.ones_like(pred_fake), reduction="mean")
