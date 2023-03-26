@@ -658,7 +658,7 @@ def main():
                 revision=args.revision,
             )
         else:
-            print(f" {bcolors.WARNING}Discriminator network (GAN) not found. Initializing a new network.{bcolors.ENDC}")
+            print(f" {bcolors.WARNING}Discriminator network (GAN) not found. Initializing a new network. It may take a very large number of steps to train.{bcolors.ENDC}")
             discriminator = Discriminator()
     
     if is_xformers_available() and args.attention=='xformers':
