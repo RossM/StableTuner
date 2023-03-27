@@ -35,8 +35,9 @@ from accelerate.logging import get_logger
 from accelerate.utils import set_seed
 from diffusers import AutoencoderKL, DDIMScheduler, DDPMScheduler, DiffusionPipeline, UNet2DConditionModel,DiffusionPipeline, DPMSolverMultistepScheduler,EulerDiscreteScheduler
 from diffusers.optimization import get_scheduler
-from diffusers.modeling_utils import ModelMixin
+from diffusers.models.modeling_utils import ModelMixin
 from diffusers.configuration_utils import ConfigMixin
+from diffusers.training_utils import EMAModel
 from torchvision.transforms import functional
 from tqdm.auto import tqdm
 from transformers import CLIPTextModel, CLIPTokenizer
@@ -1227,7 +1228,8 @@ def main():
                 #scheduler = EulerDiscreteScheduler.from_pretrained(args.pretrained_model_name_or_path, subfolder="scheduler", prediction_type="v_prediction")
                 scheduler = DPMSolverMultistepScheduler.from_pretrained(args.pretrained_model_name_or_path, subfolder="scheduler")
                 unwrapped_unet = accelerator.unwrap_model(unet,True)
-                if args.use_ema and save_model:
+                if args.use_ema:
+                    ema_unet.store(unwrapped_unet.parameters())
                     ema_unet.copy_to(unwrapped_unet.parameters())
                     
                 pipeline = DiffusionPipeline.from_pretrained(
@@ -1382,6 +1384,9 @@ def main():
                 elif save_model == False and len(imgs) > 0:
                     del imgs
                     print(f"{bcolors.OKGREEN}Samples saved to {sample_dir}{bcolors.ENDC}")
+                if args.use_ema:
+                    ema_unet.restore(unwrapped_unet.parameters())
+                    
         except Exception as e:
             print(e)
             print(f"{bcolors.FAIL} Error occured during sampling, skipping.{bcolors.ENDC}")
