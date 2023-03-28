@@ -813,7 +813,7 @@ class App(ctk.CTk):
                     now = datetime.now()
                     dt_string = now.strftime("%m-%d-%H-%M")
                     #construct name
-                    name = name_of_model+'_'+res+"_e"+epoch+"_"+dt_string
+                    name = name_of_model+'_'+res+"_"+dt_string+"_"+epoch
                     #print(self.play_model_entry.get())
                     #if self.play_model_entry.get() is a directory and all required folders exist
                     if os.path.isdir(self.play_model_entry.get()) and all([os.path.exists(os.path.join(self.play_model_entry.get(), folder)) for folder in self.required_folders]):
