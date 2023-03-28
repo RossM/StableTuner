@@ -1685,7 +1685,8 @@ def main():
                     if args.use_ema == True:
                         ema_unet.step(unet.parameters())
                         
-                    del loss, model_pred
+                    del model_pred
+                    loss = loss.detach()
                     if args.with_prior_preservation:
                         del model_pred_prior
 

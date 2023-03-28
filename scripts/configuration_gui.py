@@ -652,7 +652,7 @@ class App(ctk.CTk):
     def __init__(self):
         super().__init__()
         try:
-            latest_git_hash = subprocess.check_output(["git", "ls-remote", "http://github.com/devilismyfriend/StableTuner.git","main"], cwd=Path(__file__).resolve().parent).strip().decode()[0:7]
+            latest_git_hash = subprocess.check_output(["git", "ls-remote", "http://github.com/RossM/StableTuner.git","main"], cwd=Path(__file__).resolve().parent).strip().decode()[0:7]
             #check if configs folder exists
             print("Latest git hash: " + latest_git_hash)
         except:
@@ -2130,7 +2130,7 @@ class App(ctk.CTk):
             return
     def update_ST(self):
         #git
-        new_version = subprocess.check_output(["git", "ls-remote", "http://github.com/devilismyfriend/StableTuner.git","main"], cwd=Path(__file__).resolve().parent).strip().decode()[0:7]
+        new_version = subprocess.check_output(["git", "ls-remote", "http://github.com/RossM/StableTuner.git","main"], cwd=Path(__file__).resolve().parent).strip().decode()[0:7]
         #open the stabletuner_hash.cfg file
         #update the stabletuner_hash.cfg file
         with open("configs/stabletuner_hash.cfg", "w") as f:
