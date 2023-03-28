@@ -1614,9 +1614,12 @@ def main():
                         pred_fake = discriminator(torch.cat((noisy_latents, model_pred), 1).detach()).mean([1,2,3])
                         pred_real = discriminator(torch.cat((noisy_latents, target), 1)).mean([1,2,3])
                         discriminator_loss = F.mse_loss(pred_fake, torch.zeros_like(pred_fake), reduction="mean") + F.mse_loss(pred_real, torch.ones_like(pred_real), reduction="mean")
-                        accelerator.backward(discriminator_loss)
-                        optimizer_discriminator.step()
-                        optimizer_discriminator.zero_grad()
+                        if discriminator_loss.isnan():
+                            print(f" {bcolors.WARNING}Discriminator loss is NAN, skipping the current step.{bcolors.ENDC}")
+                        else:
+                            accelerator.backward(discriminator_loss)
+                            optimizer_discriminator.step()
+                            optimizer_discriminator.zero_grad()
                         del pred_real, pred_fake, discriminator_loss
                         
                         # Turn off learning for the discriminator for the generator optimization step
@@ -1667,7 +1670,15 @@ def main():
                     if args.with_gan:
                         # Add loss from the GAN
                         pred_fake = discriminator(torch.cat((noisy_latents, model_pred), 1)).mean([1,2,3])
-                        loss += args.gan_weight * F.mse_loss(pred_fake, torch.ones_like(pred_fake), reduction="mean")
+                        gan_loss = F.mse_loss(pred_fake, torch.ones_like(pred_fake), reduction="mean")
+                        if gan_loss.isnan():
+                            print(f" {bcolors.WARNING}GAN loss is NAN. Fixing up discriminator...{bcolors.ENDC}")
+                            for name, p in discriminator.named_parameters():
+                                if p.data.isnan().any():
+                                    print("Fixing up " + name)
+                                    p.data = torch.where(p.data.isnan(), torch.randn_like(p.data), p.data).detach()
+                        else:
+                            loss += args.gan_weight * gan_loss
                         del pred_fake
                             
                     accelerator.backward(loss)
@@ -1685,8 +1696,7 @@ def main():
                     if args.use_ema == True:
                         ema_unet.step(unet.parameters())
                         
-                    del model_pred
-                    loss = loss.detach()
+                    del loss, model_pred
                     if args.with_prior_preservation:
                         del model_pred_prior
 
