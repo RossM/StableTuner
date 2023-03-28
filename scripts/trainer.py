@@ -449,10 +449,12 @@ class SelfAttention(torch.nn.Module):
         v = self.to_v(x)
         q = self.to_q(x)
         q = einops.rearrange(q, 'b n (h c) -> b (n h) c', h=self.heads)
-        #result = torch.nn.functional.scaled_dot_product_attention(q, k, v)
-        attention_scores = torch.bmm(q, k.transpose(-2, -1))
-        attention_probs = torch.softmax(attention_scores.float() / math.sqrt(self.key_dim), dim=-1).type(attention_scores.dtype)
-        result = torch.bmm(attention_probs, v)
+        if hasattr(torch.nn.functional, "scaled_dot_product_attention"):
+            result = torch.nn.functional.scaled_dot_product_attention(q, k, v)
+        else:
+            attention_scores = torch.bmm(q, k.transpose(-2, -1))
+            attention_probs = torch.softmax(attention_scores.float() / math.sqrt(self.key_dim), dim=-1).type(attention_scores.dtype)
+            result = torch.bmm(attention_probs, v)
         result = einops.rearrange(result, 'b (n h) c -> b n (h c)', h=self.heads)
         out = self.to_out(result)
 
@@ -1374,6 +1376,8 @@ def main():
                                     send_media_group(args.telegram_chat_id,args.telegram_token,imgs, caption=f"Samples for the <b>{step}</b> {context} using the prompt:\n\n<b>{samplePrompt}</b>")
                                 except:
                                     pass
+                    if args.use_ema:
+                        ema_unet.restore(unwrapped_unet.parameters())
                     del pipeline
                     del unwrapped_unet
                     if torch.cuda.is_available():
@@ -1384,8 +1388,6 @@ def main():
                 elif save_model == False and len(imgs) > 0:
                     del imgs
                     print(f"{bcolors.OKGREEN}Samples saved to {sample_dir}{bcolors.ENDC}")
-                if args.use_ema:
-                    ema_unet.restore(unwrapped_unet.parameters())
                     
         except Exception as e:
             print(e)
@@ -1615,7 +1617,7 @@ def main():
                         accelerator.backward(discriminator_loss)
                         optimizer_discriminator.step()
                         optimizer_discriminator.zero_grad()
-                        pred_real = pred_fake = None
+                        del pred_real, pred_fake, discriminator_loss
                         
                         # Turn off learning for the discriminator for the generator optimization step
                         for param in discriminator.parameters():
@@ -1666,7 +1668,7 @@ def main():
                         # Add loss from the GAN
                         pred_fake = discriminator(torch.cat((noisy_latents, model_pred), 1)).mean([1,2,3])
                         loss += args.gan_weight * F.mse_loss(pred_fake, torch.ones_like(pred_fake), reduction="mean")
-                        pred_fake = None
+                        del pred_fake
                             
                     accelerator.backward(loss)
                     if accelerator.sync_gradients:
@@ -1683,7 +1685,9 @@ def main():
                     if args.use_ema == True:
                         ema_unet.step(unet.parameters())
                         
-                    loss = model_pred = model_pred_prior = None
+                    del loss, model_pred
+                    if args.with_prior_preservation:
+                        del model_pred_prior
 
                 if not global_step % args.log_interval:
                     logs = {"loss": loss_avg.avg.item(), "lr": lr_scheduler.get_last_lr()[0]}
