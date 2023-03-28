@@ -1497,13 +1497,19 @@ def main():
                         # Turn on learning for the discriminator, and do an optimization step
                         for param in discriminator.parameters():
                             param.requires_grad = True
-                        pred_fake = discriminator(torch.cat((noisy_latents, model_pred), 1).detach()).mean([1,2,3])
-                        pred_real = discriminator(torch.cat((noisy_latents, target), 1)).mean([1,2,3])
+                            
+                        pred_fake = discriminator(torch.cat((noisy_latents, model_pred), 1).detach()).nanmean([1,2,3])
+                        pred_real = discriminator(torch.cat((noisy_latents, target), 1)).nanmean([1,2,3])
                         discriminator_loss = F.mse_loss(pred_fake, torch.zeros_like(pred_fake), reduction="mean") + F.mse_loss(pred_real, torch.ones_like(pred_real), reduction="mean")
                         if discriminator_loss.isnan():
-                            print(f" {bcolors.WARNING}Discriminator loss is NAN, skipping the current step.{bcolors.ENDC}")
+                            print(f" {bcolors.WARNING}Discriminator loss is NAN, skipping GAN update.{bcolors.ENDC}")
                         else:
                             accelerator.backward(discriminator_loss)
+                            if accelerator.sync_gradients:
+                                accelerator.clip_grad_norm_(discriminator.parameters(), args.max_grad_norm)
+                            for name, p in discriminator.named_parameters():
+                                if p.grad != None and p.grad.isnan().any():
+                                    p.grad = torch.where(p.grad.isnan(), torch.zeros_like(p.grad), p.grad).detach()
                             optimizer_discriminator.step()
                             optimizer_discriminator.zero_grad()
                         del pred_real, pred_fake, discriminator_loss
@@ -1555,19 +1561,14 @@ def main():
                             
                     if args.with_gan:
                         # Add loss from the GAN
-                        pred_fake = discriminator(torch.cat((noisy_latents, model_pred), 1)).mean([1,2,3])
+                        pred_fake = discriminator(torch.cat((noisy_latents, model_pred), 1)).nanmean([1,2,3])
                         gan_loss = F.mse_loss(pred_fake, torch.ones_like(pred_fake), reduction="mean")
                         if gan_loss.isnan():
-                            print(f" {bcolors.WARNING}GAN loss is NAN. Fixing up discriminator...{bcolors.ENDC}")
-                            for name, p in discriminator.named_parameters():
-                                if p.data.isnan().any():
-                                    print("Fixing up " + name)
-                                    p.data = torch.where(p.data.isnan(), torch.randn_like(p.data), p.data).detach()
-                                print(name, p.data)
+                            print(f" {bcolors.WARNING}GAN loss is NAN, skipping GAN loss.{bcolors.ENDC}")
                         else:
                             loss += args.gan_weight * gan_loss
                         del pred_fake
-                            
+
                     accelerator.backward(loss)
                     if accelerator.sync_gradients:
                         params_to_clip = (
@@ -1576,6 +1577,9 @@ def main():
                             else unet.parameters()
                         )
                         accelerator.clip_grad_norm_(params_to_clip, args.max_grad_norm)
+                    for name, p in unet.named_parameters():
+                        if p.grad != None and p.grad.isnan().any():
+                            p.grad = torch.where(p.grad.isnan(), torch.zeros_like(p.grad), p.grad).detach()
                     optimizer.step()
                     lr_scheduler.step()
                     optimizer.zero_grad()
