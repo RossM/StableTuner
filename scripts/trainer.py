@@ -1567,6 +1567,8 @@ def main():
                         if mask is not None and args.normalize_masked_area_loss:
                             loss = loss / mask_mean
                             
+                    base_loss = loss
+                            
                     if args.with_gan:
                         # Add loss from the GAN
                         pred_fake = discriminator(torch.cat((noisy_latents, model_pred), 1)).nanmean([1,2,3])
@@ -1592,15 +1594,21 @@ def main():
                         if p.isnan().any():
                             fix_nans_(p, name)
                     optimizer.zero_grad()
-                    loss_avg.update(loss.detach_(), bsz)
+                    loss_avg.update(base_loss.detach_(), bsz)
                     if args.use_ema == True:
                         ema_unet.step(unet.parameters())
+                        
+                    if args.with_gan:
+                        gan_loss.detach_()
                         
                     del loss, model_pred
                     if args.with_prior_preservation:
                         del model_pred_prior
 
-                logs = {"loss": loss_avg.avg.item(), "lr": lr_scheduler.get_last_lr()[0]}
+                if args.with_gan:
+                    logs = {"loss": loss_avg.avg.item(), "gan_loss": gan_loss.item(), "lr": lr_scheduler.get_last_lr()[0]}
+                else:
+                    logs = {"loss": loss_avg.avg.item(), "lr": lr_scheduler.get_last_lr()[0]}
                 progress_bar.set_postfix(**logs)
                 if not global_step % args.log_interval:
                     accelerator.log(logs, step=global_step)
