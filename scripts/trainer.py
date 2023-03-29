@@ -1518,7 +1518,7 @@ def main():
                             # Hack to fix NaNs caused by GAN training
                             for name, p in discriminator.named_parameters():
                                 if p.isnan().any():
-                                    p.data = torch.where(p.data.isnan(), torch.zeros_like(p.data), p.data).detach()
+                                    fix_nans_(p, name)
                             optimizer_discriminator.zero_grad()
                         del pred_real, pred_fake, discriminator_loss
                         
@@ -1590,7 +1590,7 @@ def main():
                     # Hack to fix NaNs caused by GAN training
                     for name, p in unet.named_parameters():
                         if p.isnan().any():
-                            p.data = torch.where(p.data.isnan(), torch.zeros_like(p.data), p.data).detach()
+                            fix_nans_(p, name)
                     optimizer.zero_grad()
                     loss_avg.update(loss.detach_(), bsz)
                     if args.use_ema == True:
