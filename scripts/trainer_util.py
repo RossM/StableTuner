@@ -425,17 +425,7 @@ class Depth2Img:
             image_path = Path(image_path)
         return image_path.parent / f"{image_path.stem}-depth.png"
         
-def fix_nans_(param, name=None):
-    mean = param.nanmean().detach()
-    std = torch.sqrt((param - mean) ** 2).nanmean().detach()
-    if mean.isnan() or std.isnan():
-        if "bias" in name:
-            (mean, std) = (0, 0)
-        elif len(param.shape) < 2:
-            (mean, std) = (1, 0)
-        else:
-            (mean, std) = (0, 1.0/math.sqrt(param.shape[1]))
-    else:
-        (mean, std) = (mean.item(), std.item())
-    print(name, param.shape, mean, std)
+def fix_nans_(param, name=None, stats=None):
+    (std, mean) = stats or (1, 0)
+    print(name, param.shape, param.dtype, mean, std)
     param.data = torch.where(param.data.isnan(), torch.randn_like(param.data) * std + mean, param.data).detach()

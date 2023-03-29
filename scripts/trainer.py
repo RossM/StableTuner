@@ -1394,6 +1394,9 @@ def main():
         mid_quit_step = False
         #lambda set mid_generation to true
         frozen_directory=args.output_dir + "/frozen_text_encoder"
+        
+        unet_stats = {}
+        discriminator_stats = {}
 
         for epoch in range(args.num_train_epochs):
             #every 10 epochs print instructions
@@ -1518,7 +1521,11 @@ def main():
                             # Hack to fix NaNs caused by GAN training
                             for name, p in discriminator.named_parameters():
                                 if p.isnan().any():
-                                    fix_nans_(p, name)
+                                    fix_nans_(p, name, discriminator_stats[name])
+                                else:
+                                    (std, mean) = torch.std_mean(p)
+                                    discriminator_stats[name] = (std.item(), mean.item())
+                                    del std, mean
                             optimizer_discriminator.zero_grad()
                         del pred_real, pred_fake, discriminator_loss
                         
@@ -1592,7 +1599,11 @@ def main():
                     # Hack to fix NaNs caused by GAN training
                     for name, p in unet.named_parameters():
                         if p.isnan().any():
-                            fix_nans_(p, name)
+                            fix_nans_(p, name, unet_stats[name])
+                        else:
+                            (std, mean) = torch.std_mean(p)
+                            unet_stats[name] = (std.item(), mean.item())
+                            del std, mean
                     optimizer.zero_grad()
                     loss_avg.update(base_loss.detach_(), bsz)
                     if args.use_ema == True:
