@@ -92,7 +92,7 @@ if not dreambooth_skip_install:
     if os.name == "nt":
         torch_cmd = os.environ.get('TORCH_COMMAND', None)
         if torch_cmd is None:
-            torch_cmd = 'pip install torch torchvision torchaudio --extra-index-url https://download.pytorch.org/whl/cu117 --upgrade"'
+            torch_cmd = 'pip install torch==1.13.1+cu117 torchvision torchaudio --extra-index-url https://download.pytorch.org/whl/cu117 --upgrade"'
                         
         run(f'"{sys.executable}" -m {torch_cmd}', "Checking/upgrading existing torch/torchvision installation", "Couldn't install torch")
         
