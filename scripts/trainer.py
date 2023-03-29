@@ -920,7 +920,13 @@ def main():
             unet, optimizer, train_dataloader, lr_scheduler
         )
     if args.with_gan:
-        discriminator, optimizer_discriminator = accelerator.prepare(discriminator, optimizer_discriminator)
+        lr_scheduler_discriminator = get_scheduler(
+            args.lr_scheduler,
+            optimizer=optimizer_discriminator,
+            num_warmup_steps=args.lr_warmup_steps * args.gradient_accumulation_steps,
+            num_training_steps=args.max_train_steps,
+        )
+        discriminator, optimizer_discriminator, lr_scheduler_discriminator = accelerator.prepare(discriminator, optimizer_discriminator, lr_scheduler_discriminator)
 
     # We need to recalculate our total training steps as the size of the training dataloader may have changed.
     num_update_steps_per_epoch = len(train_dataloader)
@@ -1497,7 +1503,7 @@ def main():
                         # Turn on learning for the discriminator, and do an optimization step
                         for param in discriminator.parameters():
                             param.requires_grad = True
-                            
+
                         pred_fake = discriminator(torch.cat((noisy_latents, model_pred), 1).detach()).nanmean([1,2,3])
                         pred_real = discriminator(torch.cat((noisy_latents, target), 1)).nanmean([1,2,3])
                         discriminator_loss = F.mse_loss(pred_fake, torch.zeros_like(pred_fake), reduction="mean") + F.mse_loss(pred_real, torch.ones_like(pred_real), reduction="mean")
@@ -1507,10 +1513,12 @@ def main():
                             accelerator.backward(discriminator_loss)
                             if accelerator.sync_gradients:
                                 accelerator.clip_grad_norm_(discriminator.parameters(), args.max_grad_norm)
-                            for name, p in discriminator.named_parameters():
-                                if p.grad != None and p.grad.isnan().any():
-                                    p.grad = torch.where(p.grad.isnan(), torch.zeros_like(p.grad), p.grad).detach()
                             optimizer_discriminator.step()
+                            lr_scheduler_discriminator.step()
+                            # Hack to fix NaNs caused by GAN training
+                            for name, p in discriminator.named_parameters():
+                                if p.isnan().any():
+                                    p.data = torch.where(p.data.isnan(), torch.zeros_like(p.data), p.data).detach()
                             optimizer_discriminator.zero_grad()
                         del pred_real, pred_fake, discriminator_loss
                         
@@ -1577,11 +1585,12 @@ def main():
                             else unet.parameters()
                         )
                         accelerator.clip_grad_norm_(params_to_clip, args.max_grad_norm)
-                    for name, p in unet.named_parameters():
-                        if p.grad != None and p.grad.isnan().any():
-                            p.grad = torch.where(p.grad.isnan(), torch.zeros_like(p.grad), p.grad).detach()
                     optimizer.step()
                     lr_scheduler.step()
+                    # Hack to fix NaNs caused by GAN training
+                    for name, p in unet.named_parameters():
+                        if p.isnan().any():
+                            p.data = torch.where(p.data.isnan(), torch.zeros_like(p.data), p.data).detach()
                     optimizer.zero_grad()
                     loss_avg.update(loss.detach_(), bsz)
                     if args.use_ema == True:
@@ -1591,9 +1600,9 @@ def main():
                     if args.with_prior_preservation:
                         del model_pred_prior
 
+                logs = {"loss": loss_avg.avg.item(), "lr": lr_scheduler.get_last_lr()[0]}
+                progress_bar.set_postfix(**logs)
                 if not global_step % args.log_interval:
-                    logs = {"loss": loss_avg.avg.item(), "lr": lr_scheduler.get_last_lr()[0]}
-                    progress_bar.set_postfix(**logs)
                     accelerator.log(logs, step=global_step)
                 
                 
