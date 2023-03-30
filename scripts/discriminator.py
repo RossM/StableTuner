@@ -1,5 +1,6 @@
 import math
 import torch
+import torch.nn as nn
 import torch.nn.functional as F
 import einops, einops.layers.torch
 import diffusers
@@ -8,9 +9,9 @@ from diffusers.configuration_utils import ConfigMixin, register_to_config
 from typing import Tuple
 
 def Downsample(dim, dim_out):
-    return torch.nn.Conv2d(dim, dim_out, 4, 2, 1)
+    return nn.Conv2d(dim, dim_out, 4, 2, 1)
 
-class Residual(torch.nn.Sequential):
+class Residual(nn.Sequential):
     def forward(self, input):
         x = input
         for module in self:
@@ -18,10 +19,10 @@ class Residual(torch.nn.Sequential):
         return x + input
 
 def Block(dim, dim_out, *, kernel_size=3, groups=8):
-    return torch.nn.Sequential(
-        torch.nn.GroupNorm(groups, dim_out),
-        torch.nn.SiLU(),
-        torch.nn.Conv2d(dim, dim_out, kernel_size=kernel_size, padding=kernel_size//2),
+    return nn.Sequential(
+        nn.GroupNorm(groups, dim_out),
+        nn.SiLU(),
+        nn.Conv2d(dim, dim_out, kernel_size=kernel_size, padding=kernel_size//2),
     )
 
 def ResnetBlock(dim, *, kernel_size=3, groups=8):
@@ -30,7 +31,7 @@ def ResnetBlock(dim, *, kernel_size=3, groups=8):
         Block(dim, dim, kernel_size=kernel_size, groups=groups),
     )
     
-class SelfAttention(torch.nn.Module):
+class SelfAttention(nn.Module):
     def __init__(self, dim, out_dim, *, heads=4, key_dim=32, value_dim=32):
         super().__init__()
         self.dim = dim
@@ -38,10 +39,10 @@ class SelfAttention(torch.nn.Module):
         self.heads = heads
         self.key_dim = key_dim
 
-        self.to_k = torch.nn.Linear(dim, key_dim)
-        self.to_v = torch.nn.Linear(dim, value_dim)
-        self.to_q = torch.nn.Linear(dim, key_dim * heads)
-        self.to_out = torch.nn.Linear(value_dim * heads, out_dim)
+        self.to_k = nn.Linear(dim, key_dim)
+        self.to_v = nn.Linear(dim, value_dim)
+        self.to_q = nn.Linear(dim, key_dim * heads)
+        self.to_out = nn.Linear(value_dim * heads, out_dim)
 
     def forward(self, x):
         shape = x.shape
@@ -51,8 +52,8 @@ class SelfAttention(torch.nn.Module):
         v = self.to_v(x)
         q = self.to_q(x)
         q = einops.rearrange(q, 'b n (h c) -> b (n h) c', h=self.heads)
-        if hasattr(torch.nn.functional, "scaled_dot_product_attention"):
-            result = torch.nn.functional.scaled_dot_product_attention(q, k, v)
+        if hasattr(nn.functional, "scaled_dot_product_attention"):
+            result = F.scaled_dot_product_attention(q, k, v)
         else:
             attention_scores = torch.bmm(q, k.transpose(-2, -1))
             attention_probs = torch.softmax(attention_scores.float() / math.sqrt(self.key_dim), dim=-1).type(attention_scores.dtype)
@@ -66,7 +67,7 @@ class SelfAttention(torch.nn.Module):
 
 def SelfAttentionBlock(dim, attention_dim, *, heads=8, groups=8):
     return Residual(
-        torch.nn.GroupNorm(groups, dim),
+        nn.GroupNorm(groups, dim),
         SelfAttention(dim, dim, heads=heads, key_dim=attention_dim, value_dim=attention_dim),
     )
     
@@ -87,33 +88,33 @@ class Discriminator2D(ModelMixin, ConfigMixin):
     ):
         super().__init__()
         
-        self.blocks = torch.nn.ModuleList([])
+        self.blocks = nn.ModuleList([])
         
-        self.conv_in = torch.nn.Conv2d(in_channels, block_out_channels[0], 7, padding=3)
+        self.conv_in = nn.Conv2d(in_channels, block_out_channels[0], 7, padding=3)
 
-        self.blocks.append(torch.nn.Sequential(
+        self.blocks.append(nn.Sequential(
             ResnetBlock(block_out_channels[0]),
             ResnetBlock(block_out_channels[0]),
             Downsample(block_out_channels[0], block_out_channels[1]),
         ))
-        self.blocks.append(torch.nn.Sequential(
+        self.blocks.append(nn.Sequential(
             SelfAttentionBlock(block_out_channels[1], attention_dim),
             ResnetBlock(block_out_channels[1]),
             ResnetBlock(block_out_channels[1]),
             Downsample(block_out_channels[1], block_out_channels[2]),
         ))
-        self.blocks.append(torch.nn.Sequential(
+        self.blocks.append(nn.Sequential(
             SelfAttentionBlock(block_out_channels[2], attention_dim),
             ResnetBlock(block_out_channels[2]),
             ResnetBlock(block_out_channels[2]),
             Downsample(block_out_channels[2], block_out_channels[3]),
         ))
-        self.blocks.append(torch.nn.Sequential(
+        self.blocks.append(nn.Sequential(
             SelfAttentionBlock(block_out_channels[3], attention_dim),
             ResnetBlock(block_out_channels[3]),
             ResnetBlock(block_out_channels[4]),
         ))
-        self.blocks.append(torch.nn.Sequential(
+        self.blocks.append(nn.Sequential(
             SelfAttentionBlock(block_out_channels[4], attention_dim),
             ResnetBlock(block_out_channels[4]),
             ResnetBlock(block_out_channels[5]),
@@ -121,10 +122,10 @@ class Discriminator2D(ModelMixin, ConfigMixin):
         
         # A simple MLP to make the final decision based on statistics from
         # the output of every block
-        self.to_out = torch.nn.Sequential(
-            torch.nn.Linear(2 * sum(block_out_channels[1:]), hidden_channels),
-            torch.nn.SiLU(),
-            torch.nn.Linear(hidden_channels, out_channels),
+        self.to_out = nn.Sequential(
+            nn.Linear(2 * sum(block_out_channels[1:]), hidden_channels),
+            nn.SiLU(),
+            nn.Linear(hidden_channels, out_channels),
         )
         
         self.gradient_checkpointing = False
