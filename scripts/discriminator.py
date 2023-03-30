@@ -82,14 +82,12 @@ class Discriminator2D(ModelMixin, ConfigMixin):
         in_channels: int = 8,
         out_channels: int = 1,
         block_out_channels: Tuple[int] = (128, 256, 512, 1024, 1024, 1024),
-        d_channels: int = 1024,
-        hidden_channels: int = 1024,
-        attention_dim: int = 64
+        hidden_channels: int = 4096,
+        attention_dim: int = 128
     ):
         super().__init__()
         
         self.blocks = torch.nn.ModuleList([])
-        self.linear_outs = torch.nn.ModuleList([])
         
         self.conv_in = torch.nn.Conv2d(in_channels, block_out_channels[0], 7, padding=3)
 
@@ -98,36 +96,33 @@ class Discriminator2D(ModelMixin, ConfigMixin):
             ResnetBlock(block_out_channels[0]),
             Downsample(block_out_channels[0], block_out_channels[1]),
         ))
-        self.linear_outs.append(torch.nn.Linear(block_out_channels[1] * 2, d_channels))
         self.blocks.append(torch.nn.Sequential(
             SelfAttentionBlock(block_out_channels[1], attention_dim),
             ResnetBlock(block_out_channels[1]),
             ResnetBlock(block_out_channels[1]),
             Downsample(block_out_channels[1], block_out_channels[2]),
         ))
-        self.linear_outs.append(torch.nn.Linear(block_out_channels[2] * 2, d_channels))
         self.blocks.append(torch.nn.Sequential(
             SelfAttentionBlock(block_out_channels[2], attention_dim),
             ResnetBlock(block_out_channels[2]),
             ResnetBlock(block_out_channels[2]),
             Downsample(block_out_channels[2], block_out_channels[3]),
         ))
-        self.linear_outs.append(torch.nn.Linear(block_out_channels[3] * 2, d_channels))
         self.blocks.append(torch.nn.Sequential(
             SelfAttentionBlock(block_out_channels[3], attention_dim),
             ResnetBlock(block_out_channels[3]),
             ResnetBlock(block_out_channels[4]),
         ))
-        self.linear_outs.append(torch.nn.Linear(block_out_channels[4] * 2, d_channels))
         self.blocks.append(torch.nn.Sequential(
             SelfAttentionBlock(block_out_channels[4], attention_dim),
             ResnetBlock(block_out_channels[4]),
             ResnetBlock(block_out_channels[5]),
         ))
-        self.linear_outs.append(torch.nn.Linear(block_out_channels[5] * 2, d_channels))
         
+        # A simple MLP to make the final decision based on statistics from
+        # the output of every block
         self.to_out = torch.nn.Sequential(
-            torch.nn.Linear(5 * d_channels, hidden_channels),
+            torch.nn.Linear(2 * sum(block_out_channels[1:]), hidden_channels),
             torch.nn.SiLU(),
             torch.nn.Linear(hidden_channels, out_channels),
         )
@@ -143,11 +138,13 @@ class Discriminator2D(ModelMixin, ConfigMixin):
     def forward(self, x):
         x = self.conv_in(x)
         d = torch.zeros([1, 0], device=x.device, dtype=x.dtype)
-        for block, linear_out in zip(self.blocks, self.linear_outs):
-            x = block(x)
+        for block in self.blocks:
+            if self.gradient_checkpointing:
+                x = torch.utils.checkpoint.checkpoint(block, x)
+            else:
+                x = block(x)
             x_mean = x.mean([-2, -1])
             x_max, _ = einops.rearrange(x, 'b c h w -> b c (h w)').max(-1)
-            out = linear_out(torch.cat([x_mean, x_max], dim=-1))
-            d = torch.cat([d, out], dim=-1)
+            d = torch.cat([d, x_mean, x_max], dim=-1)
         return self.to_out(d)
 
