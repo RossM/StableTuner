@@ -1618,10 +1618,9 @@ def main():
                     if args.with_prior_preservation:
                         del model_pred_prior
 
+                logs = {"loss": loss_avg.avg.item(), "lr": lr_scheduler.get_last_lr()[0]}
                 if args.with_gan:
-                    logs = {"loss": loss_avg.avg.item(), "gan_loss": gan_loss.item(), "lr": lr_scheduler.get_last_lr()[0]}
-                else:
-                    logs = {"loss": loss_avg.avg.item(), "lr": lr_scheduler.get_last_lr()[0]}
+                    logs["gan_loss"] = gan_loss.item()
                 progress_bar.set_postfix(**logs)
                 if not global_step % args.log_interval:
                     accelerator.log(logs, step=global_step)
