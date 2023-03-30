@@ -138,14 +138,14 @@ class Discriminator2D(ModelMixin, ConfigMixin):
         
     def forward(self, x):
         x = self.conv_in(x)
-        d = torch.zeros([1, 0], device=x.device, dtype=x.dtype)
+        d = torch.zeros([x.shape[0], 0], device=x.device, dtype=x.dtype)
         for block in self.blocks:
             if self.gradient_checkpointing:
                 x = torch.utils.checkpoint.checkpoint(block, x)
             else:
                 x = block(x)
-            x_mean = x.mean([-2, -1])
-            x_max, _ = einops.rearrange(x, 'b c h w -> b c (h w)').max(-1)
+            x_mean = einops.reduce(x, 'b c w h -> b c', 'mean')
+            x_max = einops.reduce(x, 'b c w h -> b c', 'max')
             d = torch.cat([d, x_mean, x_max], dim=-1)
         return self.to_out(d)
 
