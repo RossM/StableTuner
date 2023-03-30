@@ -4,7 +4,8 @@ import torch.nn.functional as F
 import einops, einops.layers.torch
 import diffusers
 from diffusers.models.modeling_utils import ModelMixin
-from diffusers.configuration_utils import ConfigMixin
+from diffusers.configuration_utils import ConfigMixin, register_to_config
+from typing import Tuple
 
 def Downsample(dim, dim_out):
     return torch.nn.Conv2d(dim, dim_out, 4, 2, 1)
@@ -69,39 +70,66 @@ def SelfAttentionBlock(dim, attention_dim, *, heads=8, groups=8):
         SelfAttention(dim, dim, heads=heads, key_dim=attention_dim, value_dim=attention_dim),
     )
     
-class Discriminator(ModelMixin, ConfigMixin):
+class Discriminator2D(ModelMixin, ConfigMixin):
     """
     This is a very simple discriminator architecture. It doesn't take any conditioning,
     not even the time step.
     """
 
-    def __init__(self, dim=128, attention_dim=64):
+    @register_to_config
+    def __init__(
+        self, 
+        in_channels: int = 8,
+        out_channels: int = 1,
+        block_out_channels: Tuple[int] = (128, 256, 512, 1024, 1024, 1024),
+        d_channels: int = 1024,
+        hidden_channels: int = 1024,
+        attention_dim: int = 64
+    ):
         super().__init__()
-        self.model = torch.nn.Sequential(
-            torch.nn.Conv2d(8, dim, 7, padding=3),
-            ResnetBlock(dim),
-            ResnetBlock(dim),
-            Downsample(dim, dim*2),
-            SelfAttentionBlock(dim*2, attention_dim),
-            ResnetBlock(dim*2),
-            ResnetBlock(dim*2),
-            Downsample(dim*2, dim*4),
-            SelfAttentionBlock(dim*4, attention_dim),
-            ResnetBlock(dim*4),
-            ResnetBlock(dim*4),
-            Downsample(dim*4, dim*8),
-            SelfAttentionBlock(dim*8, attention_dim),
-            ResnetBlock(dim*8),
-            ResnetBlock(dim*8),
-            SelfAttentionBlock(dim*8, attention_dim),
-            ResnetBlock(dim*8),
-            ResnetBlock(dim*8),
-            SelfAttentionBlock(dim*8, attention_dim),
-            torch.nn.Conv2d(dim*8, dim*8, 1),
-            torch.nn.GroupNorm(8, dim*8),
+        
+        self.blocks = torch.nn.ModuleList([])
+        self.linear_outs = torch.nn.ModuleList([])
+        
+        self.conv_in = torch.nn.Conv2d(in_channels, block_out_channels[0], 7, padding=3)
+
+        self.blocks.append(torch.nn.Sequential(
+            ResnetBlock(block_out_channels[0]),
+            ResnetBlock(block_out_channels[0]),
+            Downsample(block_out_channels[0], block_out_channels[1]),
+        ))
+        self.linear_outs.append(torch.nn.Linear(block_out_channels[1] * 2, d_channels))
+        self.blocks.append(torch.nn.Sequential(
+            SelfAttentionBlock(block_out_channels[1], attention_dim),
+            ResnetBlock(block_out_channels[1]),
+            ResnetBlock(block_out_channels[1]),
+            Downsample(block_out_channels[1], block_out_channels[2]),
+        ))
+        self.linear_outs.append(torch.nn.Linear(block_out_channels[2] * 2, d_channels))
+        self.blocks.append(torch.nn.Sequential(
+            SelfAttentionBlock(block_out_channels[2], attention_dim),
+            ResnetBlock(block_out_channels[2]),
+            ResnetBlock(block_out_channels[2]),
+            Downsample(block_out_channels[2], block_out_channels[3]),
+        ))
+        self.linear_outs.append(torch.nn.Linear(block_out_channels[3] * 2, d_channels))
+        self.blocks.append(torch.nn.Sequential(
+            SelfAttentionBlock(block_out_channels[3], attention_dim),
+            ResnetBlock(block_out_channels[3]),
+            ResnetBlock(block_out_channels[4]),
+        ))
+        self.linear_outs.append(torch.nn.Linear(block_out_channels[4] * 2, d_channels))
+        self.blocks.append(torch.nn.Sequential(
+            SelfAttentionBlock(block_out_channels[4], attention_dim),
+            ResnetBlock(block_out_channels[4]),
+            ResnetBlock(block_out_channels[5]),
+        ))
+        self.linear_outs.append(torch.nn.Linear(block_out_channels[5] * 2, d_channels))
+        
+        self.to_out = torch.nn.Sequential(
+            torch.nn.Linear(5 * d_channels, hidden_channels),
             torch.nn.SiLU(),
-            torch.nn.Conv2d(dim*8, 1, 1),
-            #einops.layers.torch.Reduce('b c h w -> b', 'mean'),
+            torch.nn.Linear(hidden_channels, out_channels),
         )
         
         self.gradient_checkpointing = False
@@ -113,8 +141,13 @@ class Discriminator(ModelMixin, ConfigMixin):
         self.gradient_checkpointing = False
         
     def forward(self, x):
-        if self.gradient_checkpointing:
-            return torch.utils.checkpoint.checkpoint_sequential(self.model, 10, x)
-        else:
-            return self.model(x)
+        x = self.conv_in(x)
+        d = torch.zeros([1, 0], device=x.device, dtype=x.dtype)
+        for block, linear_out in zip(self.blocks, self.linear_outs):
+            x = block(x)
+            x_mean = x.mean([-2, -1])
+            x_max, _ = einops.rearrange(x, 'b c h w -> b c (h w)').max(-1)
+            out = linear_out(torch.cat([x_mean, x_max], dim=-1))
+            d = torch.cat([d, out], dim=-1)
+        return self.to_out(d)
 

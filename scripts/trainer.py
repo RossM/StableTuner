@@ -43,7 +43,7 @@ from PIL import Image, ImageFile
 from diffusers.utils.import_utils import is_xformers_available
 from trainer_util import *
 from dataloaders_util import *
-from discriminator import Discriminator
+from discriminator import Discriminator2D
 from lion_pytorch import Lion
 logger = get_logger(__name__)
 def parse_args():
@@ -548,7 +548,7 @@ def main():
             )
         else:
             print(f" {bcolors.WARNING}Discriminator network (GAN) not found. Initializing a new network. It may take a very large number of steps to train.{bcolors.ENDC}")
-            discriminator = Discriminator()
+            discriminator = Discriminator2D()
     
     if is_xformers_available() and args.attention=='xformers':
         try:
@@ -1509,8 +1509,8 @@ def main():
                         for param in discriminator.parameters():
                             param.requires_grad = True
 
-                        pred_fake = discriminator(torch.cat((noisy_latents, model_pred), 1).detach()).nanmean([1,2,3])
-                        pred_real = discriminator(torch.cat((noisy_latents, target), 1)).nanmean([1,2,3])
+                        pred_fake = discriminator(torch.cat((noisy_latents, model_pred), 1).detach())
+                        pred_real = discriminator(torch.cat((noisy_latents, target), 1))
                         discriminator_loss = F.mse_loss(pred_fake, torch.zeros_like(pred_fake), reduction="mean") + F.mse_loss(pred_real, torch.ones_like(pred_real), reduction="mean")
                         if discriminator_loss.isnan():
                             print(f" {bcolors.WARNING}Discriminator loss is NAN, skipping GAN update.{bcolors.ENDC}")
@@ -1580,7 +1580,7 @@ def main():
                             
                     if args.with_gan:
                         # Add loss from the GAN
-                        pred_fake = discriminator(torch.cat((noisy_latents, model_pred), 1)).nanmean([1,2,3])
+                        pred_fake = discriminator(torch.cat((noisy_latents, model_pred), 1))
                         gan_loss = F.mse_loss(pred_fake, torch.ones_like(pred_fake), reduction="mean")
                         if gan_loss.isnan():
                             print(f" {bcolors.WARNING}GAN loss is NAN, skipping GAN loss.{bcolors.ENDC}")
