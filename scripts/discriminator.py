@@ -83,53 +83,32 @@ class Discriminator2D(ModelMixin, ConfigMixin):
         in_channels: int = 8,
         out_channels: int = 1,
         block_out_channels: Tuple[int] = (128, 256, 512, 1024, 1024, 1024, 1024),
+        downsample_blocks: Tuple[int] = (0, 1, 2),
+        attention_blocks: Tuple[int] = (1, 2, 3, 4, 5),
         hidden_channels: int = 4096,
-        attention_dim: int = 128
+        attention_dim: int = 128,
+        repeats: int = 2,
     ):
         super().__init__()
         
         self.blocks = nn.ModuleList([])
         
         self.conv_in = nn.Conv2d(in_channels, block_out_channels[0], 7, padding=3)
-
-        self.blocks.append(nn.Sequential(
-            ResnetBlock(block_out_channels[0]),
-            ResnetBlock(block_out_channels[0]),
-            Downsample(block_out_channels[0], block_out_channels[1]),
-        ))
-        self.blocks.append(nn.Sequential(
-            SelfAttentionBlock(block_out_channels[1], attention_dim),
-            ResnetBlock(block_out_channels[1]),
-            SelfAttentionBlock(block_out_channels[1], attention_dim),
-            ResnetBlock(block_out_channels[1]),
-            Downsample(block_out_channels[1], block_out_channels[2]),
-        ))
-        self.blocks.append(nn.Sequential(
-            SelfAttentionBlock(block_out_channels[2], attention_dim),
-            ResnetBlock(block_out_channels[2]),
-            SelfAttentionBlock(block_out_channels[2], attention_dim),
-            ResnetBlock(block_out_channels[2]),
-            Downsample(block_out_channels[2], block_out_channels[3]),
-        ))
-        self.blocks.append(nn.Sequential(
-            SelfAttentionBlock(block_out_channels[3], attention_dim),
-            ResnetBlock(block_out_channels[3]),
-            SelfAttentionBlock(block_out_channels[3], attention_dim),
-            ResnetBlock(block_out_channels[4]),
-        ))
-        self.blocks.append(nn.Sequential(
-            SelfAttentionBlock(block_out_channels[4], attention_dim),
-            ResnetBlock(block_out_channels[4]),
-            SelfAttentionBlock(block_out_channels[4], attention_dim),
-            ResnetBlock(block_out_channels[5]),
-        ))
-        self.blocks.append(nn.Sequential(
-            SelfAttentionBlock(block_out_channels[5], attention_dim),
-            ResnetBlock(block_out_channels[5]),
-            SelfAttentionBlock(block_out_channels[5], attention_dim),
-            ResnetBlock(block_out_channels[6]),
-        ))
         
+        for i in range(0, len(block_out_channels) - 1):
+            in_channels = block_out_channels[i]
+            out_channels = block_out_channels[i + 1]
+            block = nn.Sequential()
+            for j in range(0, repeats):
+                if i in attention_blocks:
+                    block.append(SelfAttentionBlock(in_channels, attention_dim))
+                block.append(ResnetBlock(in_channels))
+            if i in downsample_blocks:
+                block.append(Downsample(in_channels, out_channels))
+            elif in_channels != out_channels:
+                block.append(nn.Conv2d(in_channels, out_channels, 1))
+            self.blocks.append(block)
+
         # A simple MLP to make the final decision based on statistics from
         # the output of every block
         self.to_out = nn.Sequential(
