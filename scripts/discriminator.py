@@ -82,7 +82,7 @@ class Discriminator2D(ModelMixin, ConfigMixin):
         self, 
         in_channels: int = 8,
         out_channels: int = 1,
-        block_out_channels: Tuple[int] = (128, 256, 512, 1024, 1024, 1024),
+        block_out_channels: Tuple[int] = (128, 256, 512, 1024, 1024, 1024, 1024),
         hidden_channels: int = 4096,
         attention_dim: int = 128
     ):
@@ -100,24 +100,34 @@ class Discriminator2D(ModelMixin, ConfigMixin):
         self.blocks.append(nn.Sequential(
             SelfAttentionBlock(block_out_channels[1], attention_dim),
             ResnetBlock(block_out_channels[1]),
+            SelfAttentionBlock(block_out_channels[1], attention_dim),
             ResnetBlock(block_out_channels[1]),
             Downsample(block_out_channels[1], block_out_channels[2]),
         ))
         self.blocks.append(nn.Sequential(
             SelfAttentionBlock(block_out_channels[2], attention_dim),
             ResnetBlock(block_out_channels[2]),
+            SelfAttentionBlock(block_out_channels[2], attention_dim),
             ResnetBlock(block_out_channels[2]),
             Downsample(block_out_channels[2], block_out_channels[3]),
         ))
         self.blocks.append(nn.Sequential(
             SelfAttentionBlock(block_out_channels[3], attention_dim),
             ResnetBlock(block_out_channels[3]),
+            SelfAttentionBlock(block_out_channels[3], attention_dim),
             ResnetBlock(block_out_channels[4]),
         ))
         self.blocks.append(nn.Sequential(
             SelfAttentionBlock(block_out_channels[4], attention_dim),
             ResnetBlock(block_out_channels[4]),
+            SelfAttentionBlock(block_out_channels[4], attention_dim),
             ResnetBlock(block_out_channels[5]),
+        ))
+        self.blocks.append(nn.Sequential(
+            SelfAttentionBlock(block_out_channels[5], attention_dim),
+            ResnetBlock(block_out_channels[5]),
+            SelfAttentionBlock(block_out_channels[5], attention_dim),
+            ResnetBlock(block_out_channels[6]),
         ))
         
         # A simple MLP to make the final decision based on statistics from
