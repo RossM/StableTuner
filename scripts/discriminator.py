@@ -96,17 +96,17 @@ class Discriminator2D(ModelMixin, ConfigMixin):
         self.conv_in = nn.Conv2d(in_channels, block_out_channels[0], 7, padding=3)
         
         for i in range(0, len(block_out_channels) - 1):
-            in_channels = block_out_channels[i]
-            out_channels = block_out_channels[i + 1]
+            block_in = block_out_channels[i]
+            block_out = block_out_channels[i + 1]
             block = nn.Sequential()
             for j in range(0, repeats):
                 if i in attention_blocks:
-                    block.append(SelfAttentionBlock(in_channels, attention_dim))
-                block.append(ResnetBlock(in_channels))
+                    block.append(SelfAttentionBlock(block_in, attention_dim))
+                block.append(ResnetBlock(block_in))
             if i in downsample_blocks:
-                block.append(Downsample(in_channels, out_channels))
-            elif in_channels != out_channels:
-                block.append(nn.Conv2d(in_channels, out_channels, 1))
+                block.append(Downsample(block_in, block_out))
+            elif block_in != block_out:
+                block.append(nn.Conv2d(block_in, block_out, 1))
             self.blocks.append(block)
 
         # A simple MLP to make the final decision based on statistics from
