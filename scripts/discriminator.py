@@ -82,12 +82,12 @@ class Discriminator2D(ModelMixin, ConfigMixin):
         self, 
         in_channels: int = 8,
         out_channels: int = 1,
-        block_out_channels: Tuple[int] = (128, 256, 512, 1024, 1024, 1024, 1024),
+        block_out_channels: Tuple[int] = (128, 256, 512, 1024, 1024, 1024),
+        block_repeats: Tuple[int] = (2, 2, 2, 2, 2),
         downsample_blocks: Tuple[int] = (0, 1, 2),
-        attention_blocks: Tuple[int] = (1, 2, 3, 4, 5),
+        attention_blocks: Tuple[int] = (1, 2, 3, 4),
         hidden_channels: int = 4096,
         attention_dim: int = 128,
-        repeats: int = 2,
     ):
         super().__init__()
         
@@ -99,7 +99,7 @@ class Discriminator2D(ModelMixin, ConfigMixin):
             block_in = block_out_channels[i]
             block_out = block_out_channels[i + 1]
             block = nn.Sequential()
-            for j in range(0, repeats):
+            for j in range(0, block_repeats[i]):
                 if i in attention_blocks:
                     block.append(SelfAttentionBlock(block_in, attention_dim))
                 block.append(ResnetBlock(block_in))
