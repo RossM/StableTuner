@@ -549,6 +549,8 @@ def main():
             )
         else:
             print(f" {bcolors.WARNING}Discriminator network (GAN) not found. Initializing a new network. It may take a very large number of steps to train.{bcolors.ENDC}")
+            if not args.gan_warmup:
+                print(f" {bcolors.WARNING}Consider using --gan_warmup to stabilize the model while the discriminator is being trained.{bcolors.ENDC}")
             discriminator = Discriminator2D()
     
     if is_xformers_available() and args.attention=='xformers':
