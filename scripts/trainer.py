@@ -396,6 +396,7 @@ def parse_args():
     parser.add_argument('--add_mask_prompt', type=str, default=None, action="append", dest="mask_prompts", help="Prompt for automatic mask creation")
     parser.add_argument('--with_gan', default=False, action="store_true", help="Use GAN (experimental)")
     parser.add_argument("--gan_weight", type=float, default=0.2, required=False, help="Strength of effect GAN has on training")
+    parser.add_argument("--gan_warmup", type=float, default=0, required=False, help="Slowly increases GAN weight from zero over this many steps, useful when initializing a discriminator from scratch")
     args = parser.parse_args()
     env_local_rank = int(os.environ.get("LOCAL_RANK", -1))
     if env_local_rank != -1 and env_local_rank != args.local_rank:
@@ -1589,7 +1590,10 @@ def main():
                         if gan_loss.isnan():
                             print(f" {bcolors.WARNING}GAN loss is NAN, skipping GAN loss.{bcolors.ENDC}")
                         else:
-                            loss += args.gan_weight * gan_loss
+                            gan_weight = args.gan_weight
+                            if args.gan_warmup and global_step < args.gan_warmup:
+                                gan_weight *= global_step / args.gan_warmup
+                            loss += gan_weight * gan_loss
                         del pred_fake
 
                     accelerator.backward(loss)
