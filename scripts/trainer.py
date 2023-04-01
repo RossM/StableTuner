@@ -1411,6 +1411,9 @@ def main():
             if args.train_text_encoder:
                 text_encoder.train()
             
+            with open(os.path.join(args.output_dir, "samples", "args.json"), "w") as f:
+                json.dump(args.__dict__, f, indent=2)
+            
             #save initial weights
             if args.sample_on_training_start==True and epoch==0:
                 save_and_sample_weights(epoch,'start',save_model=False)
