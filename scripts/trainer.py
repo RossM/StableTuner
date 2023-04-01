@@ -1303,8 +1303,8 @@ def main():
     progress_bar.set_description("Overall Steps")
     progress_bar_e.set_description("Overall Epochs")
     global_step = 0
-    loss_avg = AverageMeter()
-    gan_loss_avg = AverageMeter()
+    loss_avg = AverageMeter("loss_avg", max_eta=0.999)
+    gan_loss_avg = AverageMeter("gan_loss_avg", max_eta=0.999)
     text_enc_context = nullcontext() if args.train_text_encoder else torch.no_grad()
     if args.send_telegram_updates:
         try:
@@ -1621,9 +1621,9 @@ def main():
                             unet_stats[name] = (std.item(), mean.item())
                             del std, mean
                     optimizer.zero_grad()
-                    loss_avg.update(base_loss.detach_(), bsz)
+                    loss_avg.update(base_loss.detach_())
                     if args.with_gan and not gan_loss.isnan():
-                        gan_loss_avg.update(gan_loss.detach_(), bsz)
+                        gan_loss_avg.update(gan_loss.detach_())
                     if args.use_ema == True:
                         ema_unet.step(unet.parameters())
                         

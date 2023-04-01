@@ -109,17 +109,21 @@ def send_media_group(chat_id,telegram_token, images, caption=None, reply_to_mess
         media[0]['parse_mode'] = 'HTML'
         return requests.post(SEND_MEDIA_GROUP, data={'chat_id': chat_id, 'media': json.dumps(media),'disable_notification':True, 'reply_to_message_id': reply_to_message_id }, files=files)
 class AverageMeter:
-    def __init__(self, name=None):
+    def __init__(self, name=None, max_eta=None):
         self.name = name
+        self.max_eta = max_eta
         self.reset()
 
     def reset(self):
-        self.sum = self.count = self.avg = 0
+        self.count = self.avg = 0
 
+    @torch.no_grad()
     def update(self, val, n=1):
-        self.sum += val * n
+        eta = self.count / (self.count + n)
+        if self.max_eta:
+            eta = min(eta, self.max_eta ** n)
+        self.avg += (1 - eta) * (val - self.avg)
         self.count += n
-        self.avg = self.sum / self.count
 
 def exists(val):
     return val is not None
