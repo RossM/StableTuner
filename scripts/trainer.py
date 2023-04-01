@@ -1414,6 +1414,7 @@ def main():
             if args.train_text_encoder:
                 text_encoder.train()
             
+            os.makedirs(os.path.join(args.output_dir, "samples"))
             with open(os.path.join(args.output_dir, "samples", "args.json"), "w") as f:
                 json.dump(args.__dict__, f, indent=2)
             
