@@ -1302,6 +1302,7 @@ def main():
     progress_bar_e.set_description("Overall Epochs")
     global_step = 0
     loss_avg = AverageMeter()
+    gan_loss_avg = AverageMeter()
     text_enc_context = nullcontext() if args.train_text_encoder else torch.no_grad()
     if args.send_telegram_updates:
         try:
@@ -1619,11 +1620,10 @@ def main():
                             del std, mean
                     optimizer.zero_grad()
                     loss_avg.update(base_loss.detach_(), bsz)
+                    if args.with_gan and not gan_loss.isnan():
+                        gan_loss_avg.update(gan_loss.detach_(), bsz)
                     if args.use_ema == True:
                         ema_unet.step(unet.parameters())
-                        
-                    if args.with_gan:
-                        gan_loss.detach_()
                         
                     del loss, model_pred
                     if args.with_prior_preservation:
@@ -1631,7 +1631,7 @@ def main():
 
                 logs = {"loss": loss_avg.avg.item(), "lr": lr_scheduler.get_last_lr()[0]}
                 if args.with_gan:
-                    logs["gan_loss"] = gan_loss.item()
+                    logs["gan_loss"] = gan_loss_avg.avg.item()
                 progress_bar.set_postfix(**logs)
                 if not global_step % args.log_interval:
                     accelerator.log(logs, step=global_step)
