@@ -86,7 +86,7 @@ class Discriminator2D(ModelMixin, ConfigMixin):
         block_repeats: Tuple[int] = (2, 2, 2, 2, 2),
         downsample_blocks: Tuple[int] = (0, 1, 2),
         attention_blocks: Tuple[int] = (1, 2, 3, 4),
-        hidden_channels: int = 4096,
+        hidden_channels: Tuple[int] = (2048, 2048, 2048),
         attention_dim: int = 128,
     ):
         super().__init__()
@@ -111,11 +111,13 @@ class Discriminator2D(ModelMixin, ConfigMixin):
 
         # A simple MLP to make the final decision based on statistics from
         # the output of every block
-        self.to_out = nn.Sequential(
-            nn.Linear(2 * sum(block_out_channels[1:]), hidden_channels),
-            nn.SiLU(),
-            nn.Linear(hidden_channels, out_channels),
-        )
+        self.to_out = nn.Sequential()
+        d_channels = 2 * sum(block_out_channels[1:])
+        for c in hidden_channels:
+            self.to_out.append(nn.Linear(d_channels, c))
+            self.to_out.append(nn.SiLU())
+            d_channels = c
+        self.to_out.append(nn.Linear(d_channels, out_channels))
         
         self.gradient_checkpointing = False
     
