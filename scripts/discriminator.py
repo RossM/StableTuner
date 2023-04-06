@@ -86,8 +86,11 @@ class Discriminator2D(ModelMixin, ConfigMixin):
         block_repeats: Tuple[int] = (2, 2, 2, 2, 2),
         downsample_blocks: Tuple[int] = (0, 1, 2),
         attention_blocks: Tuple[int] = (1, 2, 3, 4),
-        hidden_channels: Tuple[int] = (2048, 2048, 2048),
+        mlp_hidden_channels: Tuple[int] = (2048, 2048, 2048),
+        mlp_uses_norm: bool = True,
         attention_dim: int = 128,
+        attention_heads: int = 8,
+        groups: int = 32,
     ):
         super().__init__()
         
@@ -101,8 +104,8 @@ class Discriminator2D(ModelMixin, ConfigMixin):
             block = nn.Sequential()
             for j in range(0, block_repeats[i]):
                 if i in attention_blocks:
-                    block.append(SelfAttentionBlock(block_in, attention_dim))
-                block.append(ResnetBlock(block_in))
+                    block.append(SelfAttentionBlock(block_in, attention_dim, heads=attention_heads, groups=groups))
+                block.append(ResnetBlock(block_in, groups=groups))
             if i in downsample_blocks:
                 block.append(Downsample(block_in, block_out))
             elif block_in != block_out:
@@ -113,8 +116,10 @@ class Discriminator2D(ModelMixin, ConfigMixin):
         # the output of every block
         self.to_out = nn.Sequential()
         d_channels = 2 * sum(block_out_channels[1:])
-        for c in hidden_channels:
+        for c in mlp_hidden_channels:
             self.to_out.append(nn.Linear(d_channels, c))
+            if mlp_uses_norm:
+                self.to_out.append(nn.GroupNorm(groups, c))
             self.to_out.append(nn.SiLU())
             d_channels = c
         self.to_out.append(nn.Linear(d_channels, out_channels))

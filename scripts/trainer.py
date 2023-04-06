@@ -396,7 +396,8 @@ def parse_args():
     parser.add_argument('--add_mask_prompt', type=str, default=None, action="append", dest="mask_prompts", help="Prompt for automatic mask creation")
     parser.add_argument('--with_gan', default=False, action="store_true", help="Use GAN (experimental)")
     parser.add_argument("--gan_weight", type=float, default=0.2, required=False, help="Strength of effect GAN has on training")
-    parser.add_argument("--gan_warmup", type=float, default=0, required=False, help="Slowly increases GAN weight from zero over this many steps, useful when initializing a discriminator from scratch")
+    parser.add_argument("--gan_warmup", type=float, default=0, required=False, help="Slowly increases GAN weight from zero over this many steps, useful when initializing a GAN discriminator from scratch")
+    parser.add_argument('--discriminator_config', default="configs/discriminator_large.json", help="Location of config file to use when initializing a new GAN discriminator")
     args = parser.parse_args()
     env_local_rank = int(os.environ.get("LOCAL_RANK", -1))
     if env_local_rank != -1 and env_local_rank != args.local_rank:
@@ -551,7 +552,9 @@ def main():
             print(f" {bcolors.WARNING}Discriminator network (GAN) not found. Initializing a new network. It may take a very large number of steps to train.{bcolors.ENDC}")
             if not args.gan_warmup:
                 print(f" {bcolors.WARNING}Consider using --gan_warmup to stabilize the model while the discriminator is being trained.{bcolors.ENDC}")
-            discriminator = Discriminator2D()
+            with open(args.discriminator_config, "r") as f:
+                discriminator_config = json.load(f)
+            discriminator = Discriminator2D.from_config(discriminator_config)
     
     if is_xformers_available() and args.attention=='xformers':
         try:
