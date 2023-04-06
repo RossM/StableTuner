@@ -58,7 +58,7 @@ def parse_args():
     parser.add_argument(
         "--shuffle_per_epoch",
         default=False,
-        action="store_true",
+        action=argparse.BooleanOptionalAction,
         help="Will shffule the dataset per epoch",
     )
     parser.add_argument(
@@ -89,12 +89,12 @@ def parse_args():
         required=False,
         help="Path to pretrained model or model identifier from huggingface.co/models.",
     )
-    parser.add_argument('--use_lion',default=False,action="store_true", help='Use the new LION optimizer')
-    parser.add_argument('--use_ema',default=False,action="store_true", help='Use EMA for finetuning')
-    parser.add_argument('--clip_penultimate',default=False,action="store_true", help='Use penultimate CLIP layer for text embedding')
+    parser.add_argument('--use_lion',default=False,action=argparse.BooleanOptionalAction, help='Use the new LION optimizer')
+    parser.add_argument('--use_ema',default=False,action=argparse.BooleanOptionalAction, help='Use EMA for finetuning')
+    parser.add_argument('--clip_penultimate',default=False,action=argparse.BooleanOptionalAction, help='Use penultimate CLIP layer for text embedding')
     parser.add_argument("--conditional_dropout", type=float, default=None,required=False, help="Conditional dropout probability")
-    parser.add_argument('--disable_cudnn_benchmark', default=False, action="store_true")
-    parser.add_argument('--use_text_files_as_captions', default=False, action="store_true")
+    parser.add_argument('--disable_cudnn_benchmark', default=False, action=argparse.BooleanOptionalAction)
+    parser.add_argument('--use_text_files_as_captions', default=False, action=argparse.BooleanOptionalAction)
     
     parser.add_argument(
             "--sample_from_batch",
@@ -105,7 +105,7 @@ def parse_args():
     parser.add_argument(
         "--flatten_sample_folder",
         default=True,
-        action="store_true",
+        action=argparse.BooleanOptionalAction,
         help="Will save samples in one folder instead of per-epoch",
     )
     parser.add_argument(
@@ -117,38 +117,38 @@ def parse_args():
     parser.add_argument(
         "--use_bucketing",
         default=False,
-        action="store_true",
+        action=argparse.BooleanOptionalAction,
         help="Will save and generate samples before training",
     )
     parser.add_argument(
         "--regenerate_latent_cache",
         default=False,
-        action="store_true",
+        action=argparse.BooleanOptionalAction,
         help="Will save and generate samples before training",
     )
     parser.add_argument(
         "--sample_on_training_start",
         default=False,
-        action="store_true",
+        action=argparse.BooleanOptionalAction,
         help="Will save and generate samples before training",
     )
 
     parser.add_argument(
         "--add_class_images_to_dataset",
         default=False,
-        action="store_true",
+        action=argparse.BooleanOptionalAction,
         help="will generate and add class images to the dataset without using prior reservation in training",
     )
     parser.add_argument(
         "--auto_balance_concept_datasets",
         default=False,
-        action="store_true",
+        action=argparse.BooleanOptionalAction,
         help="will balance the number of images in each concept dataset to match the minimum number of images in any concept dataset",
     )
     parser.add_argument(
         "--sample_aspect_ratios",
         default=False,
-        action="store_true",
+        action=argparse.BooleanOptionalAction,
         help="sample different aspect ratios for each image",
     )
     parser.add_argument(
@@ -245,14 +245,14 @@ def parse_args():
     parser.add_argument(
         "--with_prior_preservation",
         default=False,
-        action="store_true",
+        action=argparse.BooleanOptionalAction,
         help="Flag to add prior preservation loss.",
     )
     parser.add_argument("--prior_loss_weight", type=float, default=1.0, help="The weight of prior preservation loss.")
     parser.add_argument(
         "--with_offset_noise",
         default=False,
-        action="store_true",
+        action=argparse.BooleanOptionalAction,
         help="Flag to offset noise applied to latents.",
     )
 
@@ -283,9 +283,9 @@ def parse_args():
         ),
     )
     parser.add_argument(
-        "--center_crop", action="store_true", help="Whether to center crop images before resizing to resolution"
+        "--center_crop", default=False, action=argparse.BooleanOptionalAction, help="Whether to center crop images before resizing to resolution"
     )
-    parser.add_argument("--train_text_encoder", action="store_true", help="Whether to train the text encoder")
+    parser.add_argument("--train_text_encoder", default=False, action=argparse.BooleanOptionalAction, help="Whether to train the text encoder")
     parser.add_argument(
         "--train_batch_size", type=int, default=4, help="Batch size (per device) for the training dataloader."
     )
@@ -307,7 +307,8 @@ def parse_args():
     )
     parser.add_argument(
         "--gradient_checkpointing",
-        action="store_true",
+        default=False,
+        action=argparse.BooleanOptionalAction,
         help="Whether or not to use gradient checkpointing to save memory at the expense of slower backward pass.",
     )
     parser.add_argument(
@@ -318,7 +319,7 @@ def parse_args():
     )
     parser.add_argument(
         "--scale_lr",
-        action="store_true",
+        action=argparse.BooleanOptionalAction,
         default=False,
         help="Scale the learning rate by the number of GPUs, gradient accumulation steps, and batch size.",
     )
@@ -335,14 +336,14 @@ def parse_args():
         "--lr_warmup_steps", type=float, default=500, help="Number of steps for the warmup in the lr scheduler."
     )
     parser.add_argument(
-        "--use_8bit_adam", action="store_true", help="Whether or not to use 8-bit Adam from bitsandbytes."
+        "--use_8bit_adam", default=False, action=argparse.BooleanOptionalAction, help="Whether or not to use 8-bit Adam from bitsandbytes."
     )
     parser.add_argument("--adam_beta1", type=float, default=0.9, help="The beta1 parameter for the Adam optimizer.")
     parser.add_argument("--adam_beta2", type=float, default=0.999, help="The beta2 parameter for the Adam optimizer.")
     parser.add_argument("--adam_weight_decay", type=float, default=1e-2, help="Weight decay to use.")
     parser.add_argument("--adam_epsilon", type=float, default=1e-08, help="Epsilon value for the Adam optimizer")
     parser.add_argument("--max_grad_norm", default=1.0, type=float, help="Max gradient norm.")
-    parser.add_argument("--push_to_hub", action="store_true", help="Whether or not to push the model to the Hub.")
+    parser.add_argument("--push_to_hub", default=False, action=argparse.BooleanOptionalAction, help="Whether or not to push the model to the Hub.")
     parser.add_argument("--hub_token", type=str, default=None, help="The token to use to push to the Model Hub.")
     parser.add_argument(
         "--hub_model_id",
@@ -380,21 +381,21 @@ def parse_args():
         help="Path to json containing multiple concepts, will overwrite parameters like instance_prompt, class_prompt, etc.",
     )
     parser.add_argument("--save_sample_controlled_seed", type=int, action='append', help="Set a seed for an extra sample image to be constantly saved.")
-    parser.add_argument("--detect_full_drive", default=True, action="store_true", help="Delete checkpoints when the drive is full.")
-    parser.add_argument("--send_telegram_updates", default=False, action="store_true", help="Send Telegram updates.")
+    parser.add_argument("--detect_full_drive", default=True, action=argparse.BooleanOptionalAction, help="Delete checkpoints when the drive is full.")
+    parser.add_argument("--send_telegram_updates", default=False, action=argparse.BooleanOptionalAction, help="Send Telegram updates.")
     parser.add_argument("--telegram_chat_id", type=str, default="0", help="Telegram chat ID.")
     parser.add_argument("--telegram_token", type=str, default="0", help="Telegram token.")
-    parser.add_argument("--use_deepspeed_adam", default=False, action="store_true", help="Use experimental DeepSpeed Adam 8.")
+    parser.add_argument("--use_deepspeed_adam", default=False, action=argparse.BooleanOptionalAction, help="Use experimental DeepSpeed Adam 8.")
     parser.add_argument('--append_sample_controlled_seed_action', action='append')
     parser.add_argument('--add_sample_prompt', type=str, action='append')
-    parser.add_argument('--use_image_names_as_captions', default=False, action="store_true")
-    parser.add_argument('--shuffle_captions', default=False, action="store_true")
+    parser.add_argument('--use_image_names_as_captions', default=False, action=argparse.BooleanOptionalAction)
+    parser.add_argument('--shuffle_captions', default=False, action=argparse.BooleanOptionalAction)
     parser.add_argument("--masked_training", default=False, required=False, action='store_true', help="Whether to mask parts of the image during training")
     parser.add_argument("--normalize_masked_area_loss", default=False, required=False, action='store_true', help="Normalize the loss, to make it independent of the size of the masked area")
     parser.add_argument("--unmasked_probability", type=float, default=1, required=False, help="Probability of training a step without a mask")
     parser.add_argument("--max_denoising_strength", type=float, default=1, required=False, help="Max denoising steps to train on")
     parser.add_argument('--add_mask_prompt', type=str, default=None, action="append", dest="mask_prompts", help="Prompt for automatic mask creation")
-    parser.add_argument('--with_gan', default=False, action="store_true", help="Use GAN (experimental)")
+    parser.add_argument('--with_gan', default=False, action=argparse.BooleanOptionalAction, help="Use GAN (experimental)")
     parser.add_argument("--gan_weight", type=float, default=0.2, required=False, help="Strength of effect GAN has on training")
     parser.add_argument("--gan_warmup", type=float, default=0, required=False, help="Slowly increases GAN weight from zero over this many steps, useful when initializing a GAN discriminator from scratch")
     parser.add_argument('--discriminator_config', default="configs/discriminator_large.json", help="Location of config file to use when initializing a new GAN discriminator")
