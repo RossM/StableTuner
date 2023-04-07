@@ -545,7 +545,7 @@ def main():
     
     if args.with_gan:
         if os.path.isdir(os.path.join(args.pretrained_model_name_or_path, "discriminator")):
-            discriminator = Discriminator.from_pretrained(
+            discriminator = Discriminator2D.from_pretrained(
                 args.pretrained_model_name_or_path,
                 subfolder="discriminator",
                 revision=args.revision,
@@ -557,6 +557,7 @@ def main():
             with open(args.discriminator_config, "r") as f:
                 discriminator_config = json.load(f)
             discriminator = Discriminator2D.from_config(discriminator_config)
+        
     
     if is_xformers_available() and args.attention=='xformers':
         try:
@@ -1317,6 +1318,18 @@ def main():
             print(f"{bcolors.FAIL} Error occured during sampling, skipping.{bcolors.ENDC}")
             pass
 
+    @torch.no_grad()
+    def update_ema(ema_model, model):
+        ema_step = ema_model.config["step"]
+        decay = min((ema_step + 1) / (ema_step + 10), 0.9999)
+        ema_model.config["step"] += 1
+        for (s_param, param) in zip(ema_model.parameters(), model.parameters()):
+            if param.requires_grad:
+                s_param.add_((1 - decay) * (param - s_param))
+            else:
+                s_param.copy_(param)
+    
+
     # Only show the progress bar once on each machine.
     progress_bar_inter_epoch = tqdm(range(num_update_steps_per_epoch),bar_format='%s{l_bar}%s%s{bar}%s%s{r_bar}%s'%(bcolors.OKBLUE,bcolors.ENDC, bcolors.OKGREEN, bcolors.ENDC,bcolors.OKBLUE,bcolors.ENDC,), disable=not accelerator.is_local_main_process)
     progress_bar = tqdm(range(args.max_train_steps),bar_format='%s{l_bar}%s%s{bar}%s%s{r_bar}%s'%(bcolors.OKBLUE,bcolors.ENDC, bcolors.OKBLUE, bcolors.ENDC,bcolors.OKBLUE,bcolors.ENDC,), disable=not accelerator.is_local_main_process)
@@ -1648,15 +1661,7 @@ def main():
                     if args.with_gan and not gan_loss.isnan():
                         gan_loss_avg.update(gan_loss.detach_())
                     if args.use_ema == True:
-                        ema_step = ema_unet.config["step"]
-                        decay = min((ema_step + 1) / (ema_step + 10), 0.9999)
-                        ema_unet.config["step"] += 1
-                        with torch.no_grad():
-                            for (s_param, param) in zip(ema_unet.parameters(), unet.parameters()):
-                                if param.requires_grad:
-                                    s_param.add_((1 - decay) * (param - s_param))
-                                else:
-                                    s_param.copy_(param)
+                        update_ema(ema_unet, unet)
                         
                     del loss, model_pred
                     if args.with_prior_preservation:
