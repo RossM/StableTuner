@@ -6,7 +6,7 @@ import einops, einops.layers.torch
 import diffusers
 from diffusers.models.modeling_utils import ModelMixin
 from diffusers.configuration_utils import ConfigMixin, register_to_config
-from typing import Tuple
+from typing import Tuple, Optional
 
 def Downsample(dim, dim_out):
     return nn.Conv2d(dim, dim_out, 4, 2, 1)
@@ -18,21 +18,21 @@ class Residual(nn.Sequential):
             x = module(x)
         return x + input
 
-def Block(dim, dim_out, *, kernel_size=3, groups=8):
+def ConvLayer(dim, dim_out, *, kernel_size=3, groups=32):
     return nn.Sequential(
-        nn.GroupNorm(groups, dim_out),
+        nn.GroupNorm(groups, dim),
         nn.SiLU(),
         nn.Conv2d(dim, dim_out, kernel_size=kernel_size, padding=kernel_size//2),
     )
 
-def ResnetBlock(dim, *, kernel_size=3, groups=8):
+def ResnetBlock(dim, *, kernel_size=3, groups=32):
     return Residual(
-        Block(dim, dim, kernel_size=kernel_size, groups=groups),
-        Block(dim, dim, kernel_size=kernel_size, groups=groups),
+        ConvLayer(dim, dim, kernel_size=kernel_size, groups=groups),
+        ConvLayer(dim, dim, kernel_size=kernel_size, groups=groups),
     )
     
 class SelfAttention(nn.Module):
-    def __init__(self, dim, out_dim, *, heads=4, key_dim=32, value_dim=32):
+    def __init__(self, dim, out_dim, *, heads=8, key_dim=32, value_dim=32):
         super().__init__()
         self.dim = dim
         self.out_dim = dim
@@ -65,7 +65,9 @@ class SelfAttention(nn.Module):
         out = torch.reshape(out, (shape[0], self.out_dim, *shape[2:]))
         return out
 
-def SelfAttentionBlock(dim, attention_dim, *, heads=8, groups=8):
+def SelfAttentionBlock(dim, attention_dim, *, heads=8, groups=32):
+    if not attention_dim:
+        attention_dim = dim // heads
     return Residual(
         nn.GroupNorm(groups, dim),
         SelfAttention(dim, dim, heads=heads, key_dim=attention_dim, value_dim=attention_dim),
@@ -88,7 +90,7 @@ class Discriminator2D(ModelMixin, ConfigMixin):
         attention_blocks: Tuple[int] = (1, 2, 3, 4),
         mlp_hidden_channels: Tuple[int] = (2048, 2048, 2048),
         mlp_uses_norm: bool = True,
-        attention_dim: int = 128,
+        attention_dim: Optional[int] = None,
         attention_heads: int = 8,
         groups: int = 32,
     ):
@@ -140,8 +142,8 @@ class Discriminator2D(ModelMixin, ConfigMixin):
                 x = torch.utils.checkpoint.checkpoint(block, x)
             else:
                 x = block(x)
-            x_mean = einops.reduce(x, 'b c w h -> b c', 'mean')
-            x_max = einops.reduce(x, 'b c w h -> b c', 'max')
+            x_mean = einops.reduce(x, 'b c ... -> b c', 'mean')
+            x_max = einops.reduce(x, 'b c ... -> b c', 'max')
             d = torch.cat([d, x_mean, x_max], dim=-1)
         return self.to_out(d)
 
