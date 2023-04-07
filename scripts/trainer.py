@@ -976,7 +976,7 @@ def main():
     logger.info(f"  Total optimization steps = {args.max_train_steps}")
     def mid_train_playground(step):
         
-        print(f"{bcolors.WARNING} Booting up GUI{bcolors.ENDC}")
+        tqdm.write(f"{bcolors.WARNING} Booting up GUI{bcolors.ENDC}")
         epoch = step // num_update_steps_per_epoch
         if args.train_text_encoder and args.stop_text_encoder_training == True:
             text_enc_model = accelerator.unwrap_model(text_encoder,True)
@@ -1055,7 +1055,7 @@ def main():
             run.click(inference, inputs=[prompt, negative_prompt, num_samples, height, width, num_inference_steps,seed, guidance_scale], outputs=[gallery,seedDisplay])
         
         demo.launch(share=True,prevent_thread_lock=True)
-        print(f"{bcolors.WARNING}Gradio Session is active, Press 'F12' to resume training{bcolors.ENDC}")
+        tqdm.write(f"{bcolors.WARNING}Gradio Session is active, Press 'F12' to resume training{bcolors.ENDC}")
         keyboard.wait('f12')
         demo.close()
         del demo
@@ -1100,7 +1100,7 @@ def main():
                         #folders.remove("0")
                         #get the folder with the lowest number
                         #oldest_folder = min(folder for folder in folders if folder.isdigit())
-                        print(f"{bcolors.FAIL}Drive is almost full, Please make some space to continue training.{bcolors.ENDC}")
+                        tqdm.write(f"{bcolors.FAIL}Drive is almost full, Please make some space to continue training.{bcolors.ENDC}")
                         if args.send_telegram_updates:
                             try:
                                 send_telegram_message(f"Drive is almost full, Please make some space to continue training.", args.telegram_chat_id, args.telegram_token)
@@ -1310,14 +1310,14 @@ def main():
                         torch.cuda.empty_cache()
                         torch.cuda.ipc_collect()
                 if save_model == True:
-                    print(f"{bcolors.OKGREEN}Weights saved to {save_dir}{bcolors.ENDC}")
+                    tqdm.write(f"{bcolors.OKGREEN}Weights saved to {save_dir}{bcolors.ENDC}")
                 elif save_model == False and len(imgs) > 0:
                     del imgs
-                    print(f"{bcolors.OKGREEN}Samples saved to {sample_dir}{bcolors.ENDC}")
+                    tqdm.write(f"{bcolors.OKGREEN}Samples saved to {sample_dir}{bcolors.ENDC}")
                     
         except Exception as e:
-            print(e)
-            print(f"{bcolors.FAIL} Error occured during sampling, skipping.{bcolors.ENDC}")
+            tqdm.write(e)
+            tqdm.write(f"{bcolors.FAIL} Error occured during sampling, skipping.{bcolors.ENDC}")
             pass
 
     @torch.no_grad()
@@ -1349,72 +1349,72 @@ def main():
         except:
             pass
     try:
-        print(f" {bcolors.OKBLUE}Starting Training!{bcolors.ENDC}")
+        tqdm.write(f"{bcolors.OKBLUE}Starting Training!{bcolors.ENDC}")
         try:
             def toggle_gui(event=None):
                 if keyboard.is_pressed("ctrl") and keyboard.is_pressed("shift") and keyboard.is_pressed("g"):
-                    print(f" {bcolors.WARNING}GUI will boot as soon as the current step is done.{bcolors.ENDC}")
+                    tqdm.write(f"{bcolors.WARNING}GUI will boot as soon as the current step is done.{bcolors.ENDC}")
                     nonlocal mid_generation
                     if mid_generation == True:
                         mid_generation = False
-                        print(f" {bcolors.WARNING}Cancelled GUI.{bcolors.ENDC}")
+                        tqdm.write(f"{bcolors.WARNING}Cancelled GUI.{bcolors.ENDC}")
                     else:
                         mid_generation = True
 
             def toggle_checkpoint(event=None):
                 if keyboard.is_pressed("ctrl") and keyboard.is_pressed("shift") and keyboard.is_pressed("s") and not keyboard.is_pressed("alt"):
-                    print(f" {bcolors.WARNING}Saving the model as soon as this epoch is done.{bcolors.ENDC}")
+                    tqdm.write(f"{bcolors.WARNING}Saving the model as soon as this epoch is done.{bcolors.ENDC}")
                     nonlocal mid_checkpoint
                     if mid_checkpoint == True:
                         mid_checkpoint = False
-                        print(f" {bcolors.WARNING}Cancelled Checkpointing.{bcolors.ENDC}")
+                        tqdm.write(f"{bcolors.WARNING}Cancelled Checkpointing.{bcolors.ENDC}")
                     else:
                         mid_checkpoint = True
 
             def toggle_sample(event=None):
                 if keyboard.is_pressed("ctrl") and keyboard.is_pressed("shift") and keyboard.is_pressed("p") and not keyboard.is_pressed("alt"):
-                    print(f" {bcolors.WARNING}Sampling will begin as soon as this epoch is done.{bcolors.ENDC}")
+                    tqdm.write(f"{bcolors.WARNING}Sampling will begin as soon as this epoch is done.{bcolors.ENDC}")
                     nonlocal mid_sample
                     if mid_sample == True:
                         mid_sample = False
-                        print(f" {bcolors.WARNING}Cancelled Sampling.{bcolors.ENDC}")
+                        tqdm.write(f"{bcolors.WARNING}Cancelled Sampling.{bcolors.ENDC}")
                     else:
                         mid_sample = True
             def toggle_checkpoint_step(event=None):
                 if keyboard.is_pressed("ctrl") and keyboard.is_pressed("shift") and keyboard.is_pressed("alt") and keyboard.is_pressed("s"):
-                    print(f" {bcolors.WARNING}Saving the model as soon as this step is done.{bcolors.ENDC}")
+                    tqdm.write(f"{bcolors.WARNING}Saving the model as soon as this step is done.{bcolors.ENDC}")
                     nonlocal mid_checkpoint_step
                     if mid_checkpoint_step == True:
                         mid_checkpoint_step = False
-                        print(f" {bcolors.WARNING}Cancelled Checkpointing.{bcolors.ENDC}")
+                        tqdm.write(f"{bcolors.WARNING}Cancelled Checkpointing.{bcolors.ENDC}")
                     else:
                         mid_checkpoint_step = True
 
             def toggle_sample_step(event=None):
                 if keyboard.is_pressed("ctrl") and keyboard.is_pressed("shift") and keyboard.is_pressed("alt") and keyboard.is_pressed("p"):
-                    print(f" {bcolors.WARNING}Sampling will begin as soon as this step is done.{bcolors.ENDC}")
+                    tqdm.write(f"{bcolors.WARNING}Sampling will begin as soon as this step is done.{bcolors.ENDC}")
                     nonlocal mid_sample_step
                     if mid_sample_step == True:
                         mid_sample_step = False
-                        print(f" {bcolors.WARNING}Cancelled Sampling.{bcolors.ENDC}")
+                        tqdm.write(f"{bcolors.WARNING}Cancelled Sampling.{bcolors.ENDC}")
                     else:
                         mid_sample_step = True
             def toggle_quit_and_save_epoch(event=None):
                 if keyboard.is_pressed("ctrl") and keyboard.is_pressed("shift") and keyboard.is_pressed("q") and not keyboard.is_pressed("alt"):
-                    print(f" {bcolors.WARNING}Quitting and saving the model as soon as this epoch is done.{bcolors.ENDC}")
+                    tqdm.write(f"{bcolors.WARNING}Quitting and saving the model as soon as this epoch is done.{bcolors.ENDC}")
                     nonlocal mid_quit
                     if mid_quit == True:
                         mid_quit = False
-                        print(f" {bcolors.WARNING}Cancelled Quitting.{bcolors.ENDC}")
+                        tqdm.write(f"{bcolors.WARNING}Cancelled Quitting.{bcolors.ENDC}")
                     else:
                         mid_quit = True
             def toggle_quit_and_save_step(event=None):
                 if keyboard.is_pressed("ctrl") and keyboard.is_pressed("shift") and keyboard.is_pressed("alt") and keyboard.is_pressed("q"):
-                    print(f" {bcolors.WARNING}Quitting and saving the model as soon as this step is done.{bcolors.ENDC}")
+                    tqdm.write(f"{bcolors.WARNING}Quitting and saving the model as soon as this step is done.{bcolors.ENDC}")
                     nonlocal mid_quit_step
                     if mid_quit_step == True:
                         mid_quit_step = False
-                        print(f" {bcolors.WARNING}Cancelled Quitting.{bcolors.ENDC}")
+                        tqdm.write(f"{bcolors.WARNING}Cancelled Quitting.{bcolors.ENDC}")
                     else:
                         mid_quit_step = True
             def help(event=None):
@@ -1462,7 +1462,7 @@ def main():
             if args.train_text_encoder and args.stop_text_encoder_training == epoch:
                 args.stop_text_encoder_training = True
                 if accelerator.is_main_process:
-                    print(f" {bcolors.WARNING} Stopping text encoder training{bcolors.ENDC}")   
+                    tqdm.write(f"{bcolors.WARNING} Stopping text encoder training{bcolors.ENDC}")   
                     current_percentage = (epoch/args.num_train_epochs)*100
                     #round to the nearest whole number
                     current_percentage = round(current_percentage,0)
@@ -1562,7 +1562,7 @@ def main():
                         pred_real = discriminator(torch.cat((noisy_latents, target), 1))
                         discriminator_loss = F.mse_loss(pred_fake, torch.zeros_like(pred_fake), reduction="mean") + F.mse_loss(pred_real, torch.ones_like(pred_real), reduction="mean")
                         if discriminator_loss.isnan():
-                            print(f" {bcolors.WARNING}Discriminator loss is NAN, skipping GAN update.{bcolors.ENDC}")
+                            tqdm.write(f"{bcolors.WARNING}Discriminator loss is NAN, skipping GAN update.{bcolors.ENDC}")
                         else:
                             accelerator.backward(discriminator_loss)
                             if accelerator.sync_gradients:
@@ -1632,7 +1632,7 @@ def main():
                         pred_fake = discriminator(torch.cat((noisy_latents, model_pred), 1))
                         gan_loss = F.mse_loss(pred_fake, torch.ones_like(pred_fake), reduction="mean")
                         if gan_loss.isnan():
-                            print(f" {bcolors.WARNING}GAN loss is NAN, skipping GAN loss.{bcolors.ENDC}")
+                            tqdm.write(f"{bcolors.WARNING}GAN loss is NAN, skipping GAN loss.{bcolors.ENDC}")
                         else:
                             gan_weight = args.gan_weight
                             if args.gan_warmup and global_step < args.gan_warmup:
