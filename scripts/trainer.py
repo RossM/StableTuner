@@ -584,6 +584,8 @@ def main():
         else:
             ema_unet = copy.deepcopy(unet)
             ema_unet.config["step"] = 0
+        for param in ema_unet.parameters():
+            param.requires_grad = False
 
     if args.model_variant == "depth2img":
         d2i = Depth2Img(unet,text_encoder,args.mixed_precision,args.pretrained_model_name_or_path,accelerator)
@@ -1187,7 +1189,7 @@ def main():
                             shutil.rmtree(os.path.join(save_dir, folder))
                 imgs = []
                 if args.use_ema and args.sample_from_ema:
-                    pipeline.unet = accelerator.unwrap_model(ema_unet,True)
+                    pipeline.unet = ema_unet
                     
                 for param in unet.parameters():
                     param.requires_grad = False
