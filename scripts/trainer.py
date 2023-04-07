@@ -1184,11 +1184,11 @@ def main():
                 if save_model:
                     pipeline.save_pretrained(save_dir,safe_serialization=True)
                     if args.with_gan:
-                        discriminator.save_pretrained(f"{save_dir}/discriminator",safe_serialization=True)
+                        discriminator.save_pretrained(os.path.join(save_dir, "discriminator"), safe_serialization=True)
                     if args.use_ema:
-                        ema_unet.save_pretrained(f"{save_dir}/ema_unet",safe_serialization=True)
+                        ema_unet.save_pretrained(os.path.join(save_dir, "ema_unet"), safe_serialization=True)
                     with open(os.path.join(save_dir, "args.json"), "w") as f:
-                            json.dump(args.__dict__, f, indent=2)
+                        json.dump(args.__dict__, f, indent=2)
                 if args.stop_text_encoder_training == True:
                     #delete every folder in frozen_directory but the text encoder
                     for folder in os.listdir(save_dir):
