@@ -22,6 +22,7 @@ import itertools
 import json
 import math
 import os
+import copy
 from contextlib import nullcontext
 from pathlib import Path
 import shutil
@@ -34,7 +35,6 @@ from accelerate.logging import get_logger
 from accelerate.utils import set_seed
 from diffusers import AutoencoderKL, DDIMScheduler, DDPMScheduler, DiffusionPipeline, UNet2DConditionModel,DiffusionPipeline, DPMSolverMultistepScheduler,EulerDiscreteScheduler
 from diffusers.optimization import get_scheduler
-from diffusers.training_utils import EMAModel
 from torchvision.transforms import functional
 from tqdm.auto import tqdm
 from transformers import CLIPTextModel, CLIPTokenizer
@@ -399,6 +399,7 @@ def parse_args():
     parser.add_argument("--gan_weight", type=float, default=0.2, required=False, help="Strength of effect GAN has on training")
     parser.add_argument("--gan_warmup", type=float, default=0, required=False, help="Slowly increases GAN weight from zero over this many steps, useful when initializing a GAN discriminator from scratch")
     parser.add_argument('--discriminator_config', default="configs/discriminator_large.json", help="Location of config file to use when initializing a new GAN discriminator")
+    parser.add_argument('--sample_from_ema', default=True, action=argparse.BooleanOptionalAction, help="Generate sample images using the EMA model")
     args = parser.parse_args()
     env_local_rank = int(os.environ.get("LOCAL_RANK", -1))
     if env_local_rank != -1 and env_local_rank != args.local_rank:
@@ -570,8 +571,19 @@ def main():
             )
     elif args.attention=='flash_attention':
         replace_unet_cross_attn_to_flash_attention()
+
     if args.use_ema == True:
-        ema_unet = EMAModel(unet.parameters())
+        if os.path.isdir(os.path.join(args.pretrained_model_name_or_path, "ema_unet")):
+            ema_unet = UNet2DConditionModel.from_pretrained(
+                args.pretrained_model_name_or_path,
+                subfolder="ema_unet",
+                revision=args.revision,
+                torch_dtype=torch.float32
+            )
+        else:
+            ema_unet = copy.deepcopy(unet)
+            ema_unet.config["step"] = 0
+
     if args.model_variant == "depth2img":
         d2i = Depth2Img(unet,text_encoder,args.mixed_precision,args.pretrained_model_name_or_path,accelerator)
     vae.requires_grad_(False)
@@ -798,7 +810,7 @@ def main():
     # as these models are only used for inference, keeping weights in full precision is not required.
     vae.to(accelerator.device, dtype=weight_dtype)
     if args.use_ema == True:
-        ema_unet.to(accelerator.device, dtype=weight_dtype)
+        ema_unet.to(accelerator.device)
     if not args.train_text_encoder:
         text_encoder.to(accelerator.device, dtype=weight_dtype)
 
@@ -975,9 +987,7 @@ def main():
             else:
                 text_enc_model = accelerator.unwrap_model(text_encoder,True)
         scheduler = DPMSolverMultistepScheduler.from_pretrained(args.pretrained_model_name_or_path, subfolder="scheduler")
-        unwrapped_unet = accelerator.unwrap_model(unet,True)
-        if args.use_ema:
-            ema_unet.copy_to(unwrapped_unet.parameters())
+        unwrapped_unet = accelerator.unwrap_model(ema_unet if args.use_ema else unet,True)
             
         pipeline = DiffusionPipeline.from_pretrained(
             args.pretrained_model_name_or_path,
@@ -1130,9 +1140,6 @@ def main():
                 #scheduler = EulerDiscreteScheduler.from_pretrained(args.pretrained_model_name_or_path, subfolder="scheduler", prediction_type="v_prediction")
                 scheduler = DPMSolverMultistepScheduler.from_pretrained(args.pretrained_model_name_or_path, subfolder="scheduler")
                 unwrapped_unet = accelerator.unwrap_model(unet,True)
-                if args.use_ema:
-                    ema_unet.store(unwrapped_unet.parameters())
-                    ema_unet.copy_to(unwrapped_unet.parameters())
                     
                 pipeline = DiffusionPipeline.from_pretrained(
                     args.pretrained_model_name_or_path,
@@ -1168,6 +1175,8 @@ def main():
                     pipeline.save_pretrained(save_dir,safe_serialization=True)
                     if args.with_gan:
                         discriminator.save_pretrained(f"{save_dir}/discriminator",safe_serialization=True)
+                    if args.use_ema:
+                        ema_unet.save_pretrained(f"{save_dir}/ema_unet",safe_serialization=True)
                     with open(os.path.join(save_dir, "args.json"), "w") as f:
                             json.dump(args.__dict__, f, indent=2)
                 if args.stop_text_encoder_training == True:
@@ -1176,6 +1185,15 @@ def main():
                         if folder != "text_encoder" and os.path.isdir(os.path.join(save_dir, folder)):
                             shutil.rmtree(os.path.join(save_dir, folder))
                 imgs = []
+                if args.use_ema and args.sample_from_ema:
+                    pipeline.unet = accelerator.unwrap_model(ema_unet,True)
+                    
+                for param in unet.parameters():
+                    param.requires_grad = False
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+                    torch.cuda.ipc_collect()
+                    
                 if args.add_sample_prompt is not None or batch_prompts != [] and args.stop_text_encoder_training != True:
                     prompts = []
                     if args.add_sample_prompt is not None:
@@ -1281,10 +1299,10 @@ def main():
                                     send_media_group(args.telegram_chat_id,args.telegram_token,imgs, caption=f"Samples for the <b>{step}</b> {context} using the prompt:\n\n<b>{samplePrompt}</b>")
                                 except:
                                     pass
-                    if args.use_ema:
-                        ema_unet.restore(unwrapped_unet.parameters())
                     del pipeline
                     del unwrapped_unet
+                    for param in unet.parameters():
+                        param.requires_grad = True
                     if torch.cuda.is_available():
                         torch.cuda.empty_cache()
                         torch.cuda.ipc_collect()
@@ -1630,7 +1648,15 @@ def main():
                     if args.with_gan and not gan_loss.isnan():
                         gan_loss_avg.update(gan_loss.detach_())
                     if args.use_ema == True:
-                        ema_unet.step(unet.parameters())
+                        ema_step = ema_unet.config["step"]
+                        decay = min((ema_step + 1) / (ema_step + 10), 0.9999)
+                        ema_unet.config["step"] += 1
+                        with torch.no_grad():
+                            for (s_param, param) in zip(ema_unet.parameters(), unet.parameters()):
+                                if param.requires_grad:
+                                    s_param.add_((1 - decay) * (param - s_param))
+                                else:
+                                    s_param.copy_(param)
                         
                     del loss, model_pred
                     if args.with_prior_preservation:
