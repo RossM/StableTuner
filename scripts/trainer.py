@@ -400,6 +400,7 @@ def parse_args():
     parser.add_argument("--gan_warmup", type=float, default=0, required=False, help="Slowly increases GAN weight from zero over this many steps, useful when initializing a GAN discriminator from scratch")
     parser.add_argument('--discriminator_config', default="configs/discriminator_large.json", help="Location of config file to use when initializing a new GAN discriminator")
     parser.add_argument('--sample_from_ema', default=True, action=argparse.BooleanOptionalAction, help="Generate sample images using the EMA model")
+    parser.add_argument('--run_name', type=str, default=None, help="Adds a custom identifier to the sample and checkpoint directories")
     args = parser.parse_args()
     env_local_rank = int(os.environ.get("LOCAL_RANK", -1))
     if env_local_rank != -1 and env_local_rank != args.local_rank:
@@ -421,7 +422,10 @@ def main():
     if args.send_telegram_updates:
         send_telegram_message(f"Booting up StableTuner!\n", args.telegram_chat_id, args.telegram_token)
     logging_dir = Path(args.output_dir, "logs", args.logging_dir)
-    main_sample_dir = os.path.join(args.output_dir, "samples")
+    if args.run_name:
+        main_sample_dir = os.path.join(args.output_dir, f"samples_{args.run_name}")
+    else:
+        main_sample_dir = os.path.join(args.output_dir, "samples")
     if os.path.exists(main_sample_dir):
             shutil.rmtree(main_sample_dir)
             os.makedirs(main_sample_dir)
@@ -1165,11 +1169,14 @@ def main():
                         )
                 elif args.attention=='flash_attention':
                     replace_unet_cross_attn_to_flash_attention()
-                save_dir = os.path.join(args.output_dir, f"{context}_{step}")
-                if args.flatten_sample_folder:
-                    sample_dir = os.path.join(args.output_dir, "samples")
+                if args.run_name:
+                    save_dir = os.path.join(args.output_dir, f"{context}_{step}_{args.run_name}")
                 else:
-                    sample_dir = os.path.join(args.output_dir, f"samples/{context}_{step}")
+                    save_dir = os.path.join(args.output_dir, f"{context}_{step}")
+                if args.flatten_sample_folder:
+                    sample_dir = main_sample_dir
+                else:
+                    sample_dir = os.path.join(main_sample_dir, f"{context}_{step}")
                 #if sample dir path does not exist, create it
                 
                 if args.stop_text_encoder_training == True:
@@ -1223,7 +1230,7 @@ def main():
                         n_sample = args.n_save_sample
                         if args.save_sample_controlled_seed:
                             n_sample += len(args.save_sample_controlled_seed)
-                        progress_bar_sample = tqdm(range(len(prompts)*n_sample),desc="Generating samples")
+                        progress_bar_sample = tqdm(total=len(prompts)*n_sample,desc="Generating samples")
                         for samplePrompt in prompts:
                             sampleIndex = prompts.index(samplePrompt)
                             #convert sampleIndex to number in words
@@ -1333,11 +1340,12 @@ def main():
     
 
     # Only show the progress bar once on each machine.
-    progress_bar_inter_epoch = tqdm(range(num_update_steps_per_epoch),bar_format='%s{l_bar}%s%s{bar}%s%s{r_bar}%s'%(bcolors.OKBLUE,bcolors.ENDC, bcolors.OKGREEN, bcolors.ENDC,bcolors.OKBLUE,bcolors.ENDC,), disable=not accelerator.is_local_main_process)
     progress_bar = tqdm(range(args.max_train_steps),bar_format='%s{l_bar}%s%s{bar}%s%s{r_bar}%s'%(bcolors.OKBLUE,bcolors.ENDC, bcolors.OKBLUE, bcolors.ENDC,bcolors.OKBLUE,bcolors.ENDC,), disable=not accelerator.is_local_main_process)
+    progress_bar_inter_epoch = tqdm(range(num_update_steps_per_epoch),bar_format='%s{l_bar}%s%s{bar}%s%s{r_bar}%s'%(bcolors.OKBLUE,bcolors.ENDC, bcolors.OKGREEN, bcolors.ENDC,bcolors.OKBLUE,bcolors.ENDC,), disable=not accelerator.is_local_main_process)
     progress_bar_e = tqdm(range(args.num_train_epochs),bar_format='%s{l_bar}%s%s{bar}%s%s{r_bar}%s'%(bcolors.OKBLUE,bcolors.ENDC, bcolors.OKGREEN, bcolors.ENDC,bcolors.OKBLUE,bcolors.ENDC,), disable=not accelerator.is_local_main_process)
 
     progress_bar.set_description("Overall Steps")
+    progress_bar_inter_epoch.set_description("Steps To Epoch")
     progress_bar_e.set_description("Overall Epochs")
     global_step = 0
     loss_avg = AverageMeter("loss_avg", max_eta=0.999)
@@ -1440,7 +1448,10 @@ def main():
         mid_quit = False
         mid_quit_step = False
         #lambda set mid_generation to true
-        frozen_directory=args.output_dir + "/frozen_text_encoder"
+        if args.run_name:
+            frozen_directory = os.path.join(args.output_dir, f"frozen_text_encoder_{args.run_name}")
+        else:
+            frozen_directory = os.path.join(args.output_dir, "frozen_text_encoder")
         
         unet_stats = {}
         discriminator_stats = {}
@@ -1476,7 +1487,6 @@ def main():
                     os.mkdir(frozen_directory)
                     save_and_sample_weights(epoch,'epoch')
                     args.stop_text_encoder_training = epoch
-            progress_bar_inter_epoch.set_description("Steps To Epoch")
             progress_bar_inter_epoch.reset(total=num_update_steps_per_epoch)
             for step, batch in enumerate(train_dataloader):
                 with accelerator.accumulate(unet):
