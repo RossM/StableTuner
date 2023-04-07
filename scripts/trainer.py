@@ -1462,8 +1462,8 @@ def main():
             if args.train_text_encoder:
                 text_encoder.train()
             
-            os.makedirs(os.path.join(args.output_dir, "samples"), exist_ok=True)
-            with open(os.path.join(args.output_dir, "samples", "args.json"), "w") as f:
+            os.makedirs(main_sample_dir, exist_ok=True)
+            with open(os.path.join(main_sample_dir, "args.json"), "w") as f:
                 json.dump(args.__dict__, f, indent=2)
             
             #save initial weights
