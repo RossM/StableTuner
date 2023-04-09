@@ -105,6 +105,12 @@ class Convert_Diffusers_to_SD():
             pipe = DiffusionPipeline.from_pretrained(model_path, torch_dtype=dtype, tokenizer=None, safety_checker=None)
             text_encoder = pipe.text_encoder
             vae = pipe.vae
+            if os.path.exists(os.path.join(model_path, "ema_unet")):
+                pipe.unet = UNet2DConditionModel.from_pretrained(
+                    model_path,
+                    subfolder="ema_unet",
+                    torch_dtype=dtype
+                )
             unet = pipe.unet
             v2_model = unet.config.cross_attention_dim == 1024
             original_model = None
