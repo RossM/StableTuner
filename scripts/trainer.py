@@ -578,10 +578,10 @@ def main():
         replace_unet_cross_attn_to_flash_attention()
 
     if args.use_ema == True:
-        if os.path.isdir(os.path.join(args.pretrained_model_name_or_path, "ema_unet")):
+        if os.path.isdir(os.path.join(args.pretrained_model_name_or_path, "unet_ema")):
             ema_unet = UNet2DConditionModel.from_pretrained(
                 args.pretrained_model_name_or_path,
-                subfolder="ema_unet",
+                subfolder="unet_ema",
                 revision=args.revision,
                 torch_dtype=torch.float32
             )
@@ -1186,7 +1186,7 @@ def main():
                     if args.with_gan:
                         discriminator.save_pretrained(os.path.join(save_dir, "discriminator"), safe_serialization=True)
                     if args.use_ema:
-                        ema_unet.save_pretrained(os.path.join(save_dir, "ema_unet"), safe_serialization=True)
+                        ema_unet.save_pretrained(os.path.join(save_dir, "unet_ema"), safe_serialization=True)
                     with open(os.path.join(save_dir, "args.json"), "w") as f:
                         json.dump(args.__dict__, f, indent=2)
                 if args.stop_text_encoder_training == True:
