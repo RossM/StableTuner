@@ -27,9 +27,11 @@
     1,
     2
   ],
+  "embedding_dim": 768,
   "groups": 32,
   "in_channels": 8,
   "mlp_hidden_channels": [
+    2048,
     2048,
     2048
   ],

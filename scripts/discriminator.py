@@ -74,11 +74,6 @@ def SelfAttentionBlock(dim, attention_dim, *, heads=8, groups=32):
     )
     
 class Discriminator2D(ModelMixin, ConfigMixin):
-    """
-    This is a very simple discriminator architecture. It doesn't take any conditioning,
-    not even the time step.
-    """
-
     @register_to_config
     def __init__(
         self, 
@@ -93,6 +88,7 @@ class Discriminator2D(ModelMixin, ConfigMixin):
         attention_dim: Optional[int] = None,
         attention_heads: int = 8,
         groups: int = 32,
+        embedding_dim: int = 768,
     ):
         super().__init__()
         
@@ -117,7 +113,7 @@ class Discriminator2D(ModelMixin, ConfigMixin):
         # A simple MLP to make the final decision based on statistics from
         # the output of every block
         self.to_out = nn.Sequential()
-        d_channels = 2 * sum(block_out_channels[1:])
+        d_channels = 2 * sum(block_out_channels[1:]) + embedding_dim
         for c in mlp_hidden_channels:
             self.to_out.append(nn.Linear(d_channels, c))
             if mlp_uses_norm:
@@ -134,9 +130,12 @@ class Discriminator2D(ModelMixin, ConfigMixin):
     def disable_gradient_checkpointing(self):
         self.gradient_checkpointing = False
         
-    def forward(self, x):
+    def forward(self, x, encoder_hidden_states):
         x = self.conv_in(x)
-        d = torch.zeros([x.shape[0], 0], device=x.device, dtype=x.dtype)
+        if self.config.embedding_dim != 0:
+            d = einops.reduce(encoder_hidden_states, 'b n c -> b c', 'mean')
+        else:
+            d = torch.zeros([x.shape[0], 0], device=x.device, dtype=x.dtype)
         for block in self.blocks:
             if self.gradient_checkpointing:
                 x = torch.utils.checkpoint.checkpoint(block, x)

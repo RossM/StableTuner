@@ -1568,8 +1568,8 @@ def main():
                         for param in discriminator.parameters():
                             param.requires_grad = True
 
-                        pred_fake = discriminator(torch.cat((noisy_latents, model_pred), 1).detach())
-                        pred_real = discriminator(torch.cat((noisy_latents, target), 1))
+                        pred_fake = discriminator(torch.cat((noisy_latents, model_pred), 1).detach(), encoder_hidden_states)
+                        pred_real = discriminator(torch.cat((noisy_latents, target), 1), encoder_hidden_states)
                         discriminator_loss = F.mse_loss(pred_fake, torch.zeros_like(pred_fake), reduction="mean") + F.mse_loss(pred_real, torch.ones_like(pred_real), reduction="mean")
                         if discriminator_loss.isnan():
                             tqdm.write(f"{bcolors.WARNING}Discriminator loss is NAN, skipping GAN update.{bcolors.ENDC}")
@@ -1639,7 +1639,7 @@ def main():
                             
                     if args.with_gan:
                         # Add loss from the GAN
-                        pred_fake = discriminator(torch.cat((noisy_latents, model_pred), 1))
+                        pred_fake = discriminator(torch.cat((noisy_latents, model_pred), 1), encoder_hidden_states)
                         gan_loss = F.mse_loss(pred_fake, torch.ones_like(pred_fake), reduction="mean")
                         if gan_loss.isnan():
                             tqdm.write(f"{bcolors.WARNING}GAN loss is NAN, skipping GAN loss.{bcolors.ENDC}")
