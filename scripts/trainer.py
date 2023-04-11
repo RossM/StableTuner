@@ -1456,15 +1456,18 @@ def main():
         unet_stats = {}
         discriminator_stats = {}
 
+        os.makedirs(main_sample_dir, exist_ok=True)
+        with open(os.path.join(main_sample_dir, "args.json"), "w") as f:
+            json.dump(args.__dict__, f, indent=2)
+        if args.with_gan:
+            with open(os.path.join(main_sample_dir, "discriminator_config.json"), "w") as f:
+                json.dump(discriminator.config, f, indent=2)
+        
         for epoch in range(args.num_train_epochs):
             #every 10 epochs print instructions
             unet.train()
             if args.train_text_encoder:
                 text_encoder.train()
-            
-            os.makedirs(main_sample_dir, exist_ok=True)
-            with open(os.path.join(main_sample_dir, "args.json"), "w") as f:
-                json.dump(args.__dict__, f, indent=2)
             
             #save initial weights
             if args.sample_on_training_start==True and epoch==0:
