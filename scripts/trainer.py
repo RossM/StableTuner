@@ -122,7 +122,7 @@ def parse_args():
     )
     parser.add_argument(
         "--regenerate_latent_cache",
-        default=False,
+        default=None,
         action=argparse.BooleanOptionalAction,
         help="Will save and generate samples before training",
     )
@@ -774,32 +774,33 @@ def main():
     #get the length of the dataset
     train_dataset_length = len(train_dataset)
     #code to check if latent cache needs to be resaved
-    #check if last_run.json file exists in logging_dir
-    if os.path.exists(logging_dir / "last_run.json"):
-        #if it exists, load it
-        with open(logging_dir / "last_run.json", "r") as f:
-            last_run = json.load(f)
-            last_run_batch_size = last_run["batch_size"]
-            last_run_dataset_length = last_run["dataset_length"]
-            if last_run_batch_size != args.train_batch_size:
-                print(f" {bcolors.WARNING}The batch_size has changed since the last run. Regenerating Latent Cache.{bcolors.ENDC}") 
+    if args.regenerate_latent_cache == None:
+        #check if last_run.json file exists in logging_dir
+        if os.path.exists(logging_dir / "last_run.json"):
+            #if it exists, load it
+            with open(logging_dir / "last_run.json", "r") as f:
+                last_run = json.load(f)
+                last_run_batch_size = last_run["batch_size"]
+                last_run_dataset_length = last_run["dataset_length"]
+                if last_run_batch_size != args.train_batch_size:
+                    print(f" {bcolors.WARNING}The batch_size has changed since the last run. Regenerating Latent Cache.{bcolors.ENDC}") 
 
-                args.regenerate_latent_cache = True
-                #save the new batch_size and dataset_length to last_run.json
-            if last_run_dataset_length != train_dataset_length:
-                print(f" {bcolors.WARNING}The dataset length has changed since the last run. Regenerating Latent Cache.{bcolors.ENDC}") 
+                    args.regenerate_latent_cache = True
+                    #save the new batch_size and dataset_length to last_run.json
+                if last_run_dataset_length != train_dataset_length:
+                    print(f" {bcolors.WARNING}The dataset length has changed since the last run. Regenerating Latent Cache.{bcolors.ENDC}") 
 
-                args.regenerate_latent_cache = True
-                #save the new batch_size and dataset_length to last_run.json
-        with open(logging_dir / "last_run.json", "w") as f:
-            json.dump({"batch_size": args.train_batch_size, "dataset_length": train_dataset_length}, f)
-                
-    else:
-        #if it doesn't exist, create it
-        last_run = {"batch_size": args.train_batch_size, "dataset_length": train_dataset_length}
-        #create the file
-        with open(logging_dir / "last_run.json", "w") as f:
-            json.dump(last_run, f)
+                    args.regenerate_latent_cache = True
+                    #save the new batch_size and dataset_length to last_run.json
+            with open(logging_dir / "last_run.json", "w") as f:
+                json.dump({"batch_size": args.train_batch_size, "dataset_length": train_dataset_length}, f)
+                    
+        else:
+            #if it doesn't exist, create it
+            last_run = {"batch_size": args.train_batch_size, "dataset_length": train_dataset_length}
+            #create the file
+            with open(logging_dir / "last_run.json", "w") as f:
+                json.dump(last_run, f)
 
     weight_dtype = torch.float32
     if accelerator.mixed_precision == "fp16":
