@@ -25,12 +25,28 @@ def ConvLayer(dim, dim_out, *, kernel_size=3, groups=32):
         nn.Conv2d(dim, dim_out, kernel_size=kernel_size, padding=kernel_size//2),
     )
 
-def ResnetBlock(dim, *, kernel_size=3, groups=32):
-    return Residual(
-        ConvLayer(dim, dim, kernel_size=kernel_size, groups=groups),
-        ConvLayer(dim, dim, kernel_size=kernel_size, groups=groups),
-    )
+class ResnetBlock(nn.Module):
+    def __init__(self, dim, *, kernel_size=3, groups=32, time_embedding_dim=128):
+        super().__init__()
+        self.conv_in = ConvLayer(dim, dim, kernel_size=kernel_size, groups=groups)
+        self.conv_out = ConvLayer(dim, dim, kernel_size=kernel_size, groups=groups)
+        self.embed_in = nn.Linear(time_embedding_dim, dim, bias=False)
     
+    def forward(self, input, time_embed):
+        x = self.conv_in(input)
+        x = x + einops.rearrange(self.embed_in(time_embed), 'b c -> b c 1 1')
+        x = self.conv_out(x)
+        return x + input
+
+class SequentialWithTimestep(nn.Sequential):
+    def forward(self, x, time_embed):
+        for module in self:
+            if isinstance(module, ResnetBlock):
+                x = module(x, time_embed)
+            else:
+                x = module(x)
+        return x
+
 class SelfAttention(nn.Module):
     def __init__(self, dim, out_dim, *, heads=8, key_dim=32, value_dim=32):
         super().__init__()
@@ -73,6 +89,15 @@ def SelfAttentionBlock(dim, attention_dim, *, heads=8, groups=32):
         SelfAttention(dim, dim, heads=heads, key_dim=attention_dim, value_dim=attention_dim),
     )
     
+def time_embedding(timesteps, dim, max_period=10000, device=None, dtype=None):
+    if dim == 0:
+        return torch.zeros([], device=device, dtype=dtype)
+    half_dim = dim // 2
+    periods = torch.arange(0, half_dim, device=device, dtype=dtype) / (half_dim - 1)
+    x = torch.pow(1 / max_period, periods)
+    x = torch.einsum('b, c -> b c', timesteps, x)
+    return torch.cat([torch.cos(x), torch.sin(x)], 1)
+    
 class Discriminator2D(ModelMixin, ConfigMixin):
     @register_to_config
     def __init__(
@@ -89,6 +114,7 @@ class Discriminator2D(ModelMixin, ConfigMixin):
         attention_heads: int = 8,
         groups: int = 32,
         embedding_dim: int = 768,
+        time_embedding_dim: int = 128,
     ):
         super().__init__()
         
@@ -99,11 +125,11 @@ class Discriminator2D(ModelMixin, ConfigMixin):
         for i in range(0, len(block_out_channels) - 1):
             block_in = block_out_channels[i]
             block_out = block_out_channels[i + 1]
-            block = nn.Sequential()
+            block = SequentialWithTimestep()
             for j in range(0, block_repeats[i]):
                 if i in attention_blocks:
                     block.append(SelfAttentionBlock(block_in, attention_dim, heads=attention_heads, groups=groups))
-                block.append(ResnetBlock(block_in, groups=groups))
+                block.append(ResnetBlock(block_in, groups=groups, time_embedding_dim=time_embedding_dim))
             if i in downsample_blocks:
                 block.append(Downsample(block_in, block_out))
             elif block_in != block_out:
@@ -130,17 +156,18 @@ class Discriminator2D(ModelMixin, ConfigMixin):
     def disable_gradient_checkpointing(self):
         self.gradient_checkpointing = False
         
-    def forward(self, x, encoder_hidden_states):
+    def forward(self, x, timesteps, encoder_hidden_states):
         x = self.conv_in(x)
+        time_embed = time_embedding(timesteps, self.config.time_embedding_dim, device=x.device, dtype=x.dtype)
         if self.config.embedding_dim != 0:
             d = einops.reduce(encoder_hidden_states, 'b n c -> b c', 'mean')
         else:
             d = torch.zeros([x.shape[0], 0], device=x.device, dtype=x.dtype)
         for block in self.blocks:
             if self.gradient_checkpointing:
-                x = torch.utils.checkpoint.checkpoint(block, x)
+                x = torch.utils.checkpoint.checkpoint(block, x, time_embed)
             else:
-                x = block(x)
+                x = block(x, time_embed)
             x_mean = einops.reduce(x, 'b c ... -> b c', 'mean')
             x_max = einops.reduce(x, 'b c ... -> b c', 'max')
             d = torch.cat([d, x_mean, x_max], dim=-1)
