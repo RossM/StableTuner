@@ -1361,82 +1361,74 @@ def main():
         tqdm.write(f"{bcolors.OKBLUE}Starting Training!{bcolors.ENDC}")
         try:
             def toggle_gui(event=None):
-                if keyboard.is_pressed("ctrl") and keyboard.is_pressed("shift") and keyboard.is_pressed("g"):
-                    tqdm.write(f"{bcolors.WARNING}GUI will boot as soon as the current step is done.{bcolors.ENDC}")
-                    nonlocal mid_generation
-                    if mid_generation == True:
-                        mid_generation = False
-                        tqdm.write(f"{bcolors.WARNING}Cancelled GUI.{bcolors.ENDC}")
-                    else:
-                        mid_generation = True
+                nonlocal mid_generation
+                if mid_generation == True:
+                    mid_generation = False
+                    tqdm.write(f"{bcolors.WARNING}Cancelled GUI.{bcolors.ENDC}")
+                else:
+                    mid_generation = True
+                tqdm.write(f"{bcolors.WARNING}GUI will boot as soon as the current step is done.{bcolors.ENDC}")
 
             def toggle_checkpoint(event=None):
-                if keyboard.is_pressed("ctrl") and keyboard.is_pressed("shift") and keyboard.is_pressed("s") and not keyboard.is_pressed("alt"):
+                nonlocal mid_checkpoint
+                if mid_checkpoint == True:
+                    mid_checkpoint = False
+                    tqdm.write(f"{bcolors.WARNING}Cancelled Checkpointing.{bcolors.ENDC}")
+                else:
+                    mid_checkpoint = True
                     tqdm.write(f"{bcolors.WARNING}Saving the model as soon as this epoch is done.{bcolors.ENDC}")
-                    nonlocal mid_checkpoint
-                    if mid_checkpoint == True:
-                        mid_checkpoint = False
-                        tqdm.write(f"{bcolors.WARNING}Cancelled Checkpointing.{bcolors.ENDC}")
-                    else:
-                        mid_checkpoint = True
 
             def toggle_sample(event=None):
-                if keyboard.is_pressed("ctrl") and keyboard.is_pressed("shift") and keyboard.is_pressed("p") and not keyboard.is_pressed("alt"):
+                nonlocal mid_sample
+                if mid_sample == True:
+                    mid_sample = False
+                    tqdm.write(f"{bcolors.WARNING}Cancelled Sampling.{bcolors.ENDC}")
+                else:
+                    mid_sample = True
                     tqdm.write(f"{bcolors.WARNING}Sampling will begin as soon as this epoch is done.{bcolors.ENDC}")
-                    nonlocal mid_sample
-                    if mid_sample == True:
-                        mid_sample = False
-                        tqdm.write(f"{bcolors.WARNING}Cancelled Sampling.{bcolors.ENDC}")
-                    else:
-                        mid_sample = True
             def toggle_checkpoint_step(event=None):
-                if keyboard.is_pressed("ctrl") and keyboard.is_pressed("shift") and keyboard.is_pressed("alt") and keyboard.is_pressed("s"):
+                nonlocal mid_checkpoint_step
+                if mid_checkpoint_step == True:
+                    mid_checkpoint_step = False
+                    tqdm.write(f"{bcolors.WARNING}Cancelled Checkpointing.{bcolors.ENDC}")
+                else:
+                    mid_checkpoint_step = True
                     tqdm.write(f"{bcolors.WARNING}Saving the model as soon as this step is done.{bcolors.ENDC}")
-                    nonlocal mid_checkpoint_step
-                    if mid_checkpoint_step == True:
-                        mid_checkpoint_step = False
-                        tqdm.write(f"{bcolors.WARNING}Cancelled Checkpointing.{bcolors.ENDC}")
-                    else:
-                        mid_checkpoint_step = True
 
             def toggle_sample_step(event=None):
-                if keyboard.is_pressed("ctrl") and keyboard.is_pressed("shift") and keyboard.is_pressed("alt") and keyboard.is_pressed("p"):
+                nonlocal mid_sample_step
+                if mid_sample_step == True:
+                    mid_sample_step = False
+                    tqdm.write(f"{bcolors.WARNING}Cancelled Sampling.{bcolors.ENDC}")
+                else:
+                    mid_sample_step = True
                     tqdm.write(f"{bcolors.WARNING}Sampling will begin as soon as this step is done.{bcolors.ENDC}")
-                    nonlocal mid_sample_step
-                    if mid_sample_step == True:
-                        mid_sample_step = False
-                        tqdm.write(f"{bcolors.WARNING}Cancelled Sampling.{bcolors.ENDC}")
-                    else:
-                        mid_sample_step = True
             def toggle_quit_and_save_epoch(event=None):
-                if keyboard.is_pressed("ctrl") and keyboard.is_pressed("shift") and keyboard.is_pressed("q") and not keyboard.is_pressed("alt"):
+                nonlocal mid_quit
+                if mid_quit == True:
+                    mid_quit = False
+                    tqdm.write(f"{bcolors.WARNING}Cancelled Quitting.{bcolors.ENDC}")
+                else:
+                    mid_quit = True
                     tqdm.write(f"{bcolors.WARNING}Quitting and saving the model as soon as this epoch is done.{bcolors.ENDC}")
-                    nonlocal mid_quit
-                    if mid_quit == True:
-                        mid_quit = False
-                        tqdm.write(f"{bcolors.WARNING}Cancelled Quitting.{bcolors.ENDC}")
-                    else:
-                        mid_quit = True
             def toggle_quit_and_save_step(event=None):
-                if keyboard.is_pressed("ctrl") and keyboard.is_pressed("shift") and keyboard.is_pressed("alt") and keyboard.is_pressed("q"):
+                nonlocal mid_quit_step
+                if mid_quit_step == True:
+                    mid_quit_step = False
+                    tqdm.write(f"{bcolors.WARNING}Cancelled Quitting.{bcolors.ENDC}")
+                else:
+                    mid_quit_step = True
                     tqdm.write(f"{bcolors.WARNING}Quitting and saving the model as soon as this step is done.{bcolors.ENDC}")
-                    nonlocal mid_quit_step
-                    if mid_quit_step == True:
-                        mid_quit_step = False
-                        tqdm.write(f"{bcolors.WARNING}Cancelled Quitting.{bcolors.ENDC}")
-                    else:
-                        mid_quit_step = True
             def help(event=None):
-                if keyboard.is_pressed("ctrl") and keyboard.is_pressed("h"):
-                    print_instructions()
-            keyboard.on_press_key("g", toggle_gui)
-            keyboard.on_press_key("s", toggle_checkpoint)
-            keyboard.on_press_key("p", toggle_sample)
-            keyboard.on_press_key("s", toggle_checkpoint_step)
-            keyboard.on_press_key("p", toggle_sample_step)
-            keyboard.on_press_key("q", toggle_quit_and_save_epoch)
-            keyboard.on_press_key("q", toggle_quit_and_save_step)
-            keyboard.on_press_key("h", help)
+                print_instructions()
+            keyboard.add_hotkey("ctrl+shift+g", toggle_gui)
+            keyboard.add_hotkey("ctrl+shift+s", toggle_checkpoint)
+            keyboard.add_hotkey("ctrl+shift+p", toggle_sample)
+            keyboard.add_hotkey("ctrl+alt+shift+s", toggle_checkpoint_step)
+            keyboard.add_hotkey("ctrl+alt+shift+p", toggle_sample_step)
+            keyboard.add_hotkey("ctrl+shift+q", toggle_quit_and_save_epoch)
+            keyboard.add_hotkey("ctrl+alt+shift+q", toggle_quit_and_save_step)
+            keyboard.add_hotkey("ctrl+h", help)
             print_instructions()
         except Exception as e:
             pass
