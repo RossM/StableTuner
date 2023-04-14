@@ -59,6 +59,8 @@ class SelfAttention(nn.Module):
         self.to_v = nn.Linear(dim, value_dim)
         self.to_q = nn.Linear(dim, key_dim * heads)
         self.to_out = nn.Linear(value_dim * heads, out_dim)
+        
+        self.use_efficient_attention = hasattr(F, "scaled_dot_product_attention")
 
     def forward(self, x):
         shape = x.shape
@@ -68,7 +70,7 @@ class SelfAttention(nn.Module):
         v = self.to_v(x)
         q = self.to_q(x)
         q = einops.rearrange(q, 'b n (h c) -> b (n h) c', h=self.heads)
-        if hasattr(nn.functional, "scaled_dot_product_attention"):
+        if self.use_efficient_attention:
             result = F.scaled_dot_product_attention(q, k, v)
         else:
             attention_scores = torch.bmm(q, k.transpose(-2, -1))
