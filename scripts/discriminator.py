@@ -4,6 +4,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import einops, einops.layers.torch
 import diffusers
+from diffusers.models.embeddings import get_timestep_embedding
 from diffusers.models.modeling_utils import ModelMixin
 from diffusers.configuration_utils import ConfigMixin, register_to_config
 from typing import Tuple, Optional
@@ -91,15 +92,6 @@ def SelfAttentionBlock(dim, attention_dim, *, heads=8, groups=32):
         SelfAttention(dim, dim, heads=heads, key_dim=attention_dim, value_dim=attention_dim),
     )
     
-def time_embedding(timesteps, dim, max_period=10000, device=None, dtype=None):
-    if dim == 0:
-        return torch.zeros([], device=device, dtype=dtype)
-    half_dim = dim // 2
-    periods = torch.arange(0, half_dim, device=device, dtype=dtype) / (half_dim - 1)
-    x = torch.pow(1 / max_period, periods)
-    x = torch.einsum('b, c -> b c', timesteps, x)
-    return torch.cat([torch.cos(x), torch.sin(x)], 1)
-    
 class Discriminator2D(ModelMixin, ConfigMixin):
     @register_to_config
     def __init__(
@@ -160,7 +152,7 @@ class Discriminator2D(ModelMixin, ConfigMixin):
         
     def forward(self, x, timesteps, encoder_hidden_states):
         x = self.conv_in(x)
-        time_embed = time_embedding(timesteps, self.config.time_embedding_dim, device=x.device, dtype=x.dtype)
+        time_embed = get_timestep_embedding(timesteps,  self.config.time_embedding_dim)
         if self.config.embedding_dim != 0:
             d = einops.reduce(encoder_hidden_states, 'b n c -> b c', 'mean')
         else:
