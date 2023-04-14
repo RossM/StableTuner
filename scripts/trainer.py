@@ -1704,6 +1704,10 @@ def main():
                     accelerator.wait_for_everyone()
                     save_and_sample_weights(global_step,'quit_step')
                     quit()
+                if global_step >= args.max_train_steps and step < num_update_steps_per_epoch - 1:
+                    accelerator.wait_for_everyone()
+                    save_and_sample_weights(global_step,'final_step')
+                    quit()
                 if mid_generation==True:
                     mid_train_playground(global_step)
                     mid_generation=False
@@ -1714,15 +1718,15 @@ def main():
                 elif mid_sample_step == True:
                     save_and_sample_weights(global_step,'step',save_model=False)
                     mid_sample_step=False
-                if global_step >= args.max_train_steps:
-                    break
             progress_bar_e.update(1)
             if mid_quit==True:
                 accelerator.wait_for_everyone()
                 save_and_sample_weights(epoch,'quit_epoch')
                 quit()
             if epoch == args.num_train_epochs - 1:
-                save_and_sample_weights(epoch,'epoch',True)
+                accelerator.wait_for_everyone()
+                save_and_sample_weights(epoch,'final_epoch')
+                quit()
             elif args.save_every_n_epoch and (epoch + 1) % args.save_every_n_epoch == 0:
                 save_and_sample_weights(epoch,'epoch',True)
             elif mid_checkpoint==True:
