@@ -401,6 +401,7 @@ def parse_args():
     parser.add_argument('--discriminator_config', default="configs/discriminator_large.json", help="Location of config file to use when initializing a new GAN discriminator")
     parser.add_argument('--sample_from_ema', default=True, action=argparse.BooleanOptionalAction, help="Generate sample images using the EMA model")
     parser.add_argument('--run_name', type=str, default=None, help="Adds a custom identifier to the sample and checkpoint directories")
+    parser.add_argument('--gan_ema', default=False, action=argparse.BooleanOptionalAction, help="Use GAN EMA (experimental)")
     args = parser.parse_args()
     env_local_rank = int(os.environ.get("LOCAL_RANK", -1))
     if env_local_rank != -1 and env_local_rank != args.local_rank:
@@ -561,6 +562,8 @@ def main():
             with open(args.discriminator_config, "r") as f:
                 discriminator_config = json.load(f)
             discriminator = Discriminator2D.from_config(discriminator_config)
+        ema_discriminator = copy.deepcopy(discriminator)
+        ema_discriminator.config["step"] = 0
         
     
     if is_xformers_available() and args.attention=='xformers':
@@ -588,8 +591,7 @@ def main():
         else:
             ema_unet = copy.deepcopy(unet)
             ema_unet.config["step"] = 0
-        for param in ema_unet.parameters():
-            param.requires_grad = False
+        ema_unet.requires_grad_(False)
 
     if args.model_variant == "depth2img":
         d2i = Depth2Img(unet,text_encoder,args.mixed_precision,args.pretrained_model_name_or_path,accelerator)
@@ -819,6 +821,8 @@ def main():
     vae.to(accelerator.device, dtype=weight_dtype)
     if args.use_ema == True:
         ema_unet.to(accelerator.device)
+    if args.gan_ema:
+        ema_discriminator.to(accelerator.device)
     if not args.train_text_encoder:
         text_encoder.to(accelerator.device, dtype=weight_dtype)
 
@@ -1199,8 +1203,7 @@ def main():
                 if args.use_ema and args.sample_from_ema:
                     pipeline.unet = ema_unet
                     
-                for param in unet.parameters():
-                    param.requires_grad = False
+                unet.requires_grad_(False)
                 if torch.cuda.is_available():
                     torch.cuda.empty_cache()
                     torch.cuda.ipc_collect()
@@ -1312,8 +1315,7 @@ def main():
                                     pass
                     del pipeline
                     del unwrapped_unet
-                    for param in unet.parameters():
-                        param.requires_grad = True
+                    unet.requires_grad_(True)
                     if torch.cuda.is_available():
                         torch.cuda.empty_cache()
                         torch.cuda.ipc_collect()
@@ -1329,9 +1331,9 @@ def main():
             pass
 
     @torch.no_grad()
-    def update_ema(ema_model, model):
+    def update_ema(ema_model, model, max_decay = 0.9999):
         ema_step = ema_model.config["step"]
-        decay = min((ema_step + 1) / (ema_step + 10), 0.9999)
+        decay = min((ema_step + 1) / (ema_step + 10), max_decay)
         ema_model.config["step"] += 1
         for (s_param, param) in zip(ema_model.parameters(), model.parameters()):
             if param.requires_grad:
@@ -1561,8 +1563,7 @@ def main():
 
                     if args.with_gan:
                         # Turn on learning for the discriminator, and do an optimization step
-                        for param in discriminator.parameters():
-                            param.requires_grad = True
+                        discriminator.requires_grad_(True)
 
                         pred_fake = discriminator(torch.cat((noisy_latents, model_pred), 1).detach(), timesteps, encoder_hidden_states)
                         pred_real = discriminator(torch.cat((noisy_latents, target), 1), timesteps, encoder_hidden_states)
@@ -1585,10 +1586,14 @@ def main():
                                     del std, mean
                             optimizer_discriminator.zero_grad()
                         del pred_real, pred_fake, discriminator_loss
+
+                        if args.gan_ema == True:
+                            update_ema(ema_discriminator, discriminator, 0.99)
                         
                         # Turn off learning for the discriminator for the generator optimization step
-                        for param in discriminator.parameters():
-                            param.requires_grad = False
+                        discriminator.requires_grad_(False)
+                            
+
                     
                     if args.with_prior_preservation:
                         # Chunk the noise and noise_pred into two parts and compute the loss on each part separately.
@@ -1635,7 +1640,10 @@ def main():
                             
                     if args.with_gan:
                         # Add loss from the GAN
-                        pred_fake = discriminator(torch.cat((noisy_latents, model_pred), 1), timesteps, encoder_hidden_states)
+                        if args.gan_ema:
+                            pred_fake = ema_discriminator(torch.cat((noisy_latents, model_pred), 1), timesteps, encoder_hidden_states)
+                        else:
+                            pred_fake = discriminator(torch.cat((noisy_latents, model_pred), 1), timesteps, encoder_hidden_states)
                         gan_loss = F.mse_loss(pred_fake, torch.ones_like(pred_fake), reduction="mean")
                         if gan_loss.isnan():
                             tqdm.write(f"{bcolors.WARNING}GAN loss is NAN, skipping GAN loss.{bcolors.ENDC}")
