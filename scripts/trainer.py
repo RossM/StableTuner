@@ -402,6 +402,7 @@ def parse_args():
     parser.add_argument('--sample_from_ema', default=True, action=argparse.BooleanOptionalAction, help="Generate sample images using the EMA model")
     parser.add_argument('--run_name', type=str, default=None, help="Adds a custom identifier to the sample and checkpoint directories")
     parser.add_argument('--gan_ema', default=False, action=argparse.BooleanOptionalAction, help="Use GAN EMA (experimental)")
+    parser.add_argument('--train_unet', default=True, action=argparse.BooleanOptionalAction)
     args = parser.parse_args()
     env_local_rank = int(os.environ.get("LOCAL_RANK", -1))
     if env_local_rank != -1 and env_local_rank != args.local_rank:
@@ -557,7 +558,7 @@ def main():
             )
         else:
             print(f" {bcolors.WARNING}Discriminator network (GAN) not found. Initializing a new network. It may take a very large number of steps to train.{bcolors.ENDC}")
-            if not args.gan_warmup:
+            if args.train_unet and not args.gan_warmup:
                 print(f" {bcolors.WARNING}Consider using --gan_warmup to stabilize the model while the discriminator is being trained.{bcolors.ENDC}")
             with open(args.discriminator_config, "r") as f:
                 discriminator_config = json.load(f)
@@ -599,9 +600,12 @@ def main():
     vae.enable_slicing()
     if not args.train_text_encoder:
         text_encoder.requires_grad_(False)
+    if not args.train_unet:
+        unet.requires_grad_(False)
 
     if args.gradient_checkpointing:
-        unet.enable_gradient_checkpointing()
+        if args.train_unet:
+            unet.enable_gradient_checkpointing()
         if args.train_text_encoder:
             text_encoder.gradient_checkpointing_enable()
         if args.with_gan:
@@ -639,13 +643,14 @@ def main():
         itertools.chain(unet.parameters(), text_encoder.parameters()) if args.train_text_encoder else unet.parameters()
     )
     if args.use_lion == False:
-        optimizer = optimizer_class(
-            params_to_optimize,
-            lr=args.learning_rate,
-            betas=(args.adam_beta1, args.adam_beta2),
-            weight_decay=args.adam_weight_decay,
-            eps=args.adam_epsilon,
-        )
+        if args.train_unet:
+            optimizer = optimizer_class(
+                params_to_optimize,
+                lr=args.learning_rate,
+                betas=(args.adam_beta1, args.adam_beta2),
+                weight_decay=args.adam_weight_decay,
+                eps=args.adam_epsilon,
+            )
         if args.with_gan:
             optimizer_discriminator = optimizer_class(
                 discriminator.parameters(),
@@ -655,13 +660,14 @@ def main():
                 eps=args.adam_epsilon,
             )            
     else:
-        optimizer = optimizer_class(
-            params_to_optimize,
-            lr=args.learning_rate,
-            betas=(args.adam_beta1, args.adam_beta2),
-            weight_decay=args.adam_weight_decay,
-            #eps=args.adam_epsilon,
-        )
+        if args.train_unet:
+            optimizer = optimizer_class(
+                params_to_optimize,
+                lr=args.learning_rate,
+                betas=(args.adam_beta1, args.adam_beta2),
+                weight_decay=args.adam_weight_decay,
+                #eps=args.adam_epsilon,
+            )
         if args.with_gan:
             optimizer_discriminator = optimizer_class(
                 discriminator.parameters(),
@@ -825,6 +831,8 @@ def main():
         ema_discriminator.to(accelerator.device)
     if not args.train_text_encoder:
         text_encoder.to(accelerator.device, dtype=weight_dtype)
+    if not args.train_unet:
+        unet.to(accelerator.device)
 
     if args.use_bucketing:
         wh = set([tuple(x.target_wh) for x in train_dataset.image_train_items])
@@ -927,29 +935,24 @@ def main():
     if args.lr_warmup_steps < 1:
         args.lr_warmup_steps = math.floor(args.lr_warmup_steps * args.max_train_steps / args.gradient_accumulation_steps)
 
-    lr_scheduler = get_scheduler(
-        args.lr_scheduler,
-        optimizer=optimizer,
-        num_warmup_steps=args.lr_warmup_steps * args.gradient_accumulation_steps,
-        num_training_steps=args.max_train_steps,
-    )
+    if args.train_unet:
+        lr_scheduler = get_scheduler(
+            args.lr_scheduler,
+            optimizer=optimizer,
+            num_warmup_steps=args.lr_warmup_steps * args.gradient_accumulation_steps,
+            num_training_steps=args.max_train_steps,
+        )
+        unet, optimizer, lr_scheduler = accelerator.prepare(unet, optimizer, lr_scheduler)
+    else:
+        unet = accelerator.prepare(unet)
+
+    train_dataloader = accelerator.prepare(train_dataloader)
 
     if args.train_text_encoder and not args.use_ema:
-        unet, text_encoder, optimizer, train_dataloader, lr_scheduler = accelerator.prepare(
-            unet, text_encoder, optimizer, train_dataloader, lr_scheduler
-        )
-    elif args.train_text_encoder and args.use_ema:
-        unet, text_encoder, ema_unet, optimizer, train_dataloader, lr_scheduler = accelerator.prepare(
-            unet, text_encoder, ema_unet, optimizer, train_dataloader, lr_scheduler
-        )
-    elif not args.train_text_encoder and args.use_ema:
-        unet, ema_unet, optimizer, train_dataloader, lr_scheduler = accelerator.prepare(
-            unet, ema_unet, optimizer, train_dataloader, lr_scheduler
-        )
-    elif not args.train_text_encoder and not args.use_ema:
-        unet, optimizer, train_dataloader, lr_scheduler = accelerator.prepare(
-            unet, optimizer, train_dataloader, lr_scheduler
-        )
+        text_encoder = accelerator.prepare(text_encoder)
+    if args.use_ema:
+        ema_unet = accelerator.prepare(ema_unet)
+
     if args.with_gan:
         lr_scheduler_discriminator = get_scheduler(
             args.lr_scheduler,
@@ -1148,11 +1151,22 @@ def main():
                     else:
                         text_enc_model = accelerator.unwrap_model(text_encoder,True)
                     
+                if args.run_name:
+                    save_dir = os.path.join(args.output_dir, f"{context}_{step}_{args.run_name}")
+                else:
+                    save_dir = os.path.join(args.output_dir, f"{context}_{step}")
+                if args.flatten_sample_folder:
+                    sample_dir = main_sample_dir
+                else:
+                    sample_dir = os.path.join(main_sample_dir, f"{context}_{step}")
+                if args.stop_text_encoder_training == True:
+                    save_dir = frozen_directory
+                
                 #scheduler = DDIMScheduler(beta_start=0.00085, beta_end=0.012, beta_schedule="scaled_linear", clip_sample=False, set_alpha_to_one=False)
                 #scheduler = EulerDiscreteScheduler.from_pretrained(args.pretrained_model_name_or_path, subfolder="scheduler", prediction_type="v_prediction")
                 scheduler = DPMSolverMultistepScheduler.from_pretrained(args.pretrained_model_name_or_path, subfolder="scheduler")
+
                 unwrapped_unet = accelerator.unwrap_model(unet,True)
-                    
                 pipeline = DiffusionPipeline.from_pretrained(
                     args.pretrained_model_name_or_path,
                     unet=unwrapped_unet,
@@ -1174,31 +1188,25 @@ def main():
                         )
                 elif args.attention=='flash_attention':
                     replace_unet_cross_attn_to_flash_attention()
-                if args.run_name:
-                    save_dir = os.path.join(args.output_dir, f"{context}_{step}_{args.run_name}")
-                else:
-                    save_dir = os.path.join(args.output_dir, f"{context}_{step}")
-                if args.flatten_sample_folder:
-                    sample_dir = main_sample_dir
-                else:
-                    sample_dir = os.path.join(main_sample_dir, f"{context}_{step}")
-                #if sample dir path does not exist, create it
-                
-                if args.stop_text_encoder_training == True:
-                    save_dir = frozen_directory
+                    
                 if save_model:
-                    pipeline.save_pretrained(save_dir,safe_serialization=True)
+                    os.makedirs(save_dir, exist_ok=True)
+                    with open(os.path.join(save_dir, "args.json"), "w") as f:
+                        json.dump(args.__dict__, f, indent=2)
+                    if args.train_unet:
+                        pipeline.save_pretrained(save_dir,safe_serialization=True)
                     if args.with_gan:
                         discriminator.save_pretrained(os.path.join(save_dir, "discriminator"), safe_serialization=True)
                     if args.use_ema:
                         ema_unet.save_pretrained(os.path.join(save_dir, "unet_ema"), safe_serialization=True)
-                    with open(os.path.join(save_dir, "args.json"), "w") as f:
-                        json.dump(args.__dict__, f, indent=2)
+                    tqdm.write(f"{bcolors.OKGREEN}Weights saved to {save_dir}{bcolors.ENDC}")
+                        
                 if args.stop_text_encoder_training == True:
                     #delete every folder in frozen_directory but the text encoder
                     for folder in os.listdir(save_dir):
                         if folder != "text_encoder" and os.path.isdir(os.path.join(save_dir, folder)):
                             shutil.rmtree(os.path.join(save_dir, folder))
+                            
                 imgs = []
                 if args.use_ema and args.sample_from_ema:
                     pipeline.unet = ema_unet
@@ -1315,15 +1323,11 @@ def main():
                                     pass
                     del pipeline
                     del unwrapped_unet
-                    unet.requires_grad_(True)
+                    if args.train_unet:
+                        unet.requires_grad_(True)
                     if torch.cuda.is_available():
                         torch.cuda.empty_cache()
                         torch.cuda.ipc_collect()
-                if save_model == True:
-                    tqdm.write(f"{bcolors.OKGREEN}Weights saved to {save_dir}{bcolors.ENDC}")
-                elif save_model == False and len(imgs) > 0:
-                    del imgs
-                    tqdm.write(f"{bcolors.OKGREEN}Samples saved to {sample_dir}{bcolors.ENDC}")
                     
         except Exception as e:
             tqdm.write(e)
@@ -1353,6 +1357,7 @@ def main():
     global_step = 0
     loss_avg = AverageMeter("loss_avg", max_eta=0.999)
     gan_loss_avg = AverageMeter("gan_loss_avg", max_eta=0.999)
+    discriminator_loss_avg = AverageMeter("discriminator_loss_avg", max_eta=0.999)
     text_enc_context = nullcontext() if args.train_text_encoder else torch.no_grad()
     if args.send_telegram_updates:
         try:
@@ -1585,114 +1590,121 @@ def main():
                                     discriminator_stats[name] = (std.item(), mean.item())
                                     del std, mean
                             optimizer_discriminator.zero_grad()
-                        del pred_real, pred_fake, discriminator_loss
+                        del pred_real, pred_fake
 
                         if args.gan_ema == True:
                             update_ema(ema_discriminator, discriminator, 0.99)
+                        if not discriminator_loss.isnan():
+                            discriminator_loss_avg.update(discriminator_loss.detach_())
                         
                         # Turn off learning for the discriminator for the generator optimization step
                         discriminator.requires_grad_(False)
                             
 
-                    
-                    if args.with_prior_preservation:
-                        # Chunk the noise and noise_pred into two parts and compute the loss on each part separately.
-                        """
-                        noise_pred, noise_pred_prior = torch.chunk(noise_pred, 2, dim=0)
-                        noise, noise_prior = torch.chunk(noise, 2, dim=0)
+                    if args.train_unet:
+                        if args.with_prior_preservation:
+                            # Chunk the noise and noise_pred into two parts and compute the loss on each part separately.
+                            """
+                            noise_pred, noise_pred_prior = torch.chunk(noise_pred, 2, dim=0)
+                            noise, noise_prior = torch.chunk(noise, 2, dim=0)
 
-                        # Compute instance loss
-                        loss = F.mse_loss(noise_pred.float(), noise.float(), reduction="none").mean([1, 2, 3]).mean()
+                            # Compute instance loss
+                            loss = F.mse_loss(noise_pred.float(), noise.float(), reduction="none").mean([1, 2, 3]).mean()
 
-                        # Compute prior loss
-                        prior_loss = F.mse_loss(noise_pred_prior.float(), noise_prior.float(), reduction="mean")
+                            # Compute prior loss
+                            prior_loss = F.mse_loss(noise_pred_prior.float(), noise_prior.float(), reduction="mean")
 
-                        # Add the prior loss to the instance loss.
-                        loss = loss + args.prior_loss_weight * prior_loss
-                        """
-                        # Chunk the noise and model_pred into two parts and compute the loss on each part separately.
-                        model_pred, model_pred_prior = torch.chunk(model_pred, 2, dim=0)
-                        target, target_prior = torch.chunk(target, 2, dim=0)
-                        if mask is not None and args.model_variant != "inpainting":
-                            loss = masked_mse_loss(model_pred.float(), target.float(), mask, reduction="none").mean([1, 2, 3]).mean()
-                            prior_loss = masked_mse_loss(model_pred_prior.float(), target_prior.float(), mask, reduction="mean")
+                            # Add the prior loss to the instance loss.
+                            loss = loss + args.prior_loss_weight * prior_loss
+                            """
+                            # Chunk the noise and model_pred into two parts and compute the loss on each part separately.
+                            model_pred, model_pred_prior = torch.chunk(model_pred, 2, dim=0)
+                            target, target_prior = torch.chunk(target, 2, dim=0)
+                            if mask is not None and args.model_variant != "inpainting":
+                                loss = masked_mse_loss(model_pred.float(), target.float(), mask, reduction="none").mean([1, 2, 3]).mean()
+                                prior_loss = masked_mse_loss(model_pred_prior.float(), target_prior.float(), mask, reduction="mean")
+                            else:
+                                loss = F.mse_loss(model_pred.float(), target.float(), reduction="none").mean([1, 2, 3]).mean()
+                                prior_loss = F.mse_loss(model_pred_prior.float(), target_prior.float(), reduction="mean")
+
+                            # Add the prior loss to the instance loss.
+                            loss = loss + args.prior_loss_weight * prior_loss
+
+                            if mask is not None and args.normalize_masked_area_loss:
+                                loss = loss / mask_mean
+
                         else:
-                            loss = F.mse_loss(model_pred.float(), target.float(), reduction="none").mean([1, 2, 3]).mean()
-                            prior_loss = F.mse_loss(model_pred_prior.float(), target_prior.float(), reduction="mean")
+                            if mask is not None and args.model_variant != "inpainting":
+                                loss = masked_mse_loss(model_pred.float(), target.float(), mask, reduction="none").mean([1, 2, 3])
+                                loss = loss.mean()
+                            else:
+                                loss = F.mse_loss(model_pred.float(), target.float(), reduction="mean")
 
-                        # Add the prior loss to the instance loss.
-                        loss = loss + args.prior_loss_weight * prior_loss
+                            if mask is not None and args.normalize_masked_area_loss:
+                                loss = loss / mask_mean
+                                
+                        base_loss = loss
+                                
+                        if args.with_gan:
+                            # Add loss from the GAN
+                            if args.gan_ema:
+                                pred_fake = ema_discriminator(torch.cat((noisy_latents, model_pred), 1), timesteps, encoder_hidden_states)
+                            else:
+                                pred_fake = discriminator(torch.cat((noisy_latents, model_pred), 1), timesteps, encoder_hidden_states)
+                            gan_loss = F.mse_loss(pred_fake, torch.ones_like(pred_fake), reduction="mean")
+                            if gan_loss.isnan():
+                                tqdm.write(f"{bcolors.WARNING}GAN loss is NAN, skipping GAN loss.{bcolors.ENDC}")
+                            else:
+                                gan_weight = args.gan_weight
+                                if args.gan_warmup and global_step < args.gan_warmup:
+                                    gan_weight *= global_step / args.gan_warmup
+                                loss += gan_weight * gan_loss
+                            del pred_fake
 
-                        if mask is not None and args.normalize_masked_area_loss:
-                            loss = loss / mask_mean
+                        accelerator.backward(loss)
+                        if accelerator.sync_gradients:
+                            params_to_clip = (
+                                itertools.chain(unet.parameters(), text_encoder.parameters())
+                                if args.train_text_encoder
+                                else unet.parameters()
+                            )
+                            accelerator.clip_grad_norm_(params_to_clip, args.max_grad_norm)
+                        optimizer.step()
+                        lr_scheduler.step()
+                        # Hack to fix NaNs caused by GAN training
+                        for name, p in unet.named_parameters():
+                            if p.isnan().any():
+                                fix_nans_(p, name, unet_stats[name])
+                            else:
+                                (std, mean) = torch.std_mean(p)
+                                unet_stats[name] = (std.item(), mean.item())
+                                del std, mean
+                        optimizer.zero_grad()
+                        loss_avg.update(base_loss.detach_())
+                        if args.with_gan and not gan_loss.isnan():
+                            gan_loss_avg.update(gan_loss.detach_())
+                        if args.use_ema == True:
+                            update_ema(ema_unet, unet)
+ 
+                        del loss, model_pred
+                        if args.with_prior_preservation:
+                            del model_pred_prior
 
-                    else:
-                        if mask is not None and args.model_variant != "inpainting":
-                            loss = masked_mse_loss(model_pred.float(), target.float(), mask, reduction="none").mean([1, 2, 3])
-                            loss = loss.mean()
-                        else:
-                            loss = F.mse_loss(model_pred.float(), target.float(), reduction="mean")
-
-                        if mask is not None and args.normalize_masked_area_loss:
-                            loss = loss / mask_mean
-                            
-                    base_loss = loss
-                            
-                    if args.with_gan:
-                        # Add loss from the GAN
-                        if args.gan_ema:
-                            pred_fake = ema_discriminator(torch.cat((noisy_latents, model_pred), 1), timesteps, encoder_hidden_states)
-                        else:
-                            pred_fake = discriminator(torch.cat((noisy_latents, model_pred), 1), timesteps, encoder_hidden_states)
-                        gan_loss = F.mse_loss(pred_fake, torch.ones_like(pred_fake), reduction="mean")
-                        if gan_loss.isnan():
-                            tqdm.write(f"{bcolors.WARNING}GAN loss is NAN, skipping GAN loss.{bcolors.ENDC}")
-                        else:
-                            gan_weight = args.gan_weight
-                            if args.gan_warmup and global_step < args.gan_warmup:
-                                gan_weight *= global_step / args.gan_warmup
-                            loss += gan_weight * gan_loss
-                        del pred_fake
-
-                    accelerator.backward(loss)
-                    if accelerator.sync_gradients:
-                        params_to_clip = (
-                            itertools.chain(unet.parameters(), text_encoder.parameters())
-                            if args.train_text_encoder
-                            else unet.parameters()
-                        )
-                        accelerator.clip_grad_norm_(params_to_clip, args.max_grad_norm)
-                    optimizer.step()
-                    lr_scheduler.step()
-                    # Hack to fix NaNs caused by GAN training
-                    for name, p in unet.named_parameters():
-                        if p.isnan().any():
-                            fix_nans_(p, name, unet_stats[name])
-                        else:
-                            (std, mean) = torch.std_mean(p)
-                            unet_stats[name] = (std.item(), mean.item())
-                            del std, mean
-                    optimizer.zero_grad()
-                    loss_avg.update(base_loss.detach_())
-                    if args.with_gan and not gan_loss.isnan():
-                        gan_loss_avg.update(gan_loss.detach_())
-                    if args.use_ema == True:
-                        update_ema(ema_unet, unet)
-                        
-                    del loss, model_pred
-                    if args.with_prior_preservation:
-                        del model_pred_prior
-
-                logs = {"loss": loss_avg.avg.item(), "lr": lr_scheduler.get_last_lr()[0]}
+                logs = {}
+                if args.train_unet:
+                    logs["loss"] = loss_avg.avg.item()
+                    logs["lr"] = lr_scheduler.get_last_lr()[0]
+                elif args.with_gan:
+                    logs["lr"] = lr_scheduler_discriminator.get_last_lr()[0]
                 if args.with_gan:
+                    logs["d_loss"] = discriminator_loss_avg.avg.item()
+                if args.train_unet and args.with_gan:
                     logs["gan_loss"] = gan_loss_avg.avg.item()
                 progress_bar.set_postfix(**logs)
                 if not global_step % args.log_interval:
                     accelerator.log(logs, step=global_step)
-                
-                
 
-                if global_step > 0 and not global_step % args.sample_step_interval:
+                if global_step > 0 and args.sample_step_interval and not global_step % args.sample_step_interval:
                     save_and_sample_weights(global_step,'step',save_model=False)
 
                 progress_bar.update(1)
