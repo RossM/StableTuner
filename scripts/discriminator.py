@@ -91,6 +91,32 @@ def SelfAttentionBlock(dim, attention_dim, *, heads=8, groups=32):
         nn.GroupNorm(groups, dim),
         SelfAttention(dim, dim, heads=heads, key_dim=attention_dim, value_dim=attention_dim),
     )
+
+class AdaptiveReduce(nn.Module):
+    """
+    Reduces over all spatial dimensions, with a learnable parameter for each
+    channel that blends between max-like, mean, and min-like reduction.
+    """
+
+    def __init__(self, dim):
+        super().__init__()
+        self.dim = dim
+        
+        self.a = nn.Parameter(torch.zeros(1, dim, 1))
+    
+    def forward(self, x):
+        x = einops.rearrange(x, 'b c ... -> b c (...)')
+        weight = F.softmax(self.a * x, dim=-1)
+        return torch.sum(x * weight, dim=-1)
+        
+class MeanMaxReduce(nn.Module):
+    """
+    Reduces over all spatial dimensions and returns the mean and max by channnel.
+    """
+    def forward(self, x):
+        x_mean = einops.reduce(x, 'b c ... -> b c', 'mean')
+        x_max = einops.reduce(x, 'b c ... -> b c', 'max')
+        return torch.cat(x_mean, x_max, dim=-1)
     
 class Discriminator2D(ModelMixin, ConfigMixin):
     @register_to_config
@@ -109,10 +135,12 @@ class Discriminator2D(ModelMixin, ConfigMixin):
         groups: int = 32,
         embedding_dim: int = 768,
         time_embedding_dim: int = 128,
+        reduction_type: str = "MeanMaxReduce",
     ):
         super().__init__()
         
         self.blocks = nn.ModuleList([])
+        self.block_means = nn.ModuleList([])
         
         self.conv_in = nn.Conv2d(in_channels, block_out_channels[0], 7, padding=3)
         
@@ -129,11 +157,20 @@ class Discriminator2D(ModelMixin, ConfigMixin):
             elif block_in != block_out:
                 block.append(nn.Conv2d(block_in, block_out, 1))
             self.blocks.append(block)
+            if reduction_type == "AdaptiveReduce":
+                self.block_means.append(AdaptiveReduce(block_out))
+            elif reduction_type == "MeanMaxReduce":
+                self.block_means.append(MeanMaxReduce())
+            else:
+                raise ValueError(f"Unknown reduction type {reduction_type}")
 
         # A simple MLP to make the final decision based on statistics from
         # the output of every block
         self.to_out = nn.Sequential()
-        d_channels = 2 * sum(block_out_channels[1:]) + embedding_dim
+        if reduction_type == "MeanMaxReduce":
+            d_channels = 2 * sum(block_out_channels[1:]) + embedding_dim
+        else:
+            d_channels = sum(block_out_channels[1:]) + embedding_dim
         for c in mlp_hidden_channels:
             self.to_out.append(nn.Linear(d_channels, c))
             if mlp_uses_norm:
@@ -157,13 +194,12 @@ class Discriminator2D(ModelMixin, ConfigMixin):
             d = einops.reduce(encoder_hidden_states, 'b n c -> b c', 'mean')
         else:
             d = torch.zeros([x.shape[0], 0], device=x.device, dtype=x.dtype)
-        for block in self.blocks:
+        for (block, block_mean) in zip(self.blocks, self.block_means):
             if self.gradient_checkpointing:
                 x = torch.utils.checkpoint.checkpoint(block, x, time_embed)
             else:
                 x = block(x, time_embed)
-            x_mean = einops.reduce(x, 'b c ... -> b c', 'mean')
-            x_max = einops.reduce(x, 'b c ... -> b c', 'max')
-            d = torch.cat([d, x_mean, x_max], dim=-1)
+            x_mean = block_mean(x)
+            d = torch.cat([d, x_mean], dim=-1)
         return self.to_out(d)
 
