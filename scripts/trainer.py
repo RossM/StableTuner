@@ -424,6 +424,8 @@ def main():
     if args.send_telegram_updates:
         send_telegram_message(f"Booting up StableTuner!\n", args.telegram_chat_id, args.telegram_token)
     logging_dir = Path(args.output_dir, "logs", args.logging_dir)
+    if not args.pretrained_vae_name_or_path:
+        args.pretrained_vae_name_or_path = os.path.join(args.pretrained_model_name_or_path, "vae")
     if args.run_name:
         main_sample_dir = os.path.join(args.output_dir, f"samples_{args.run_name}")
     else:
@@ -485,7 +487,7 @@ def main():
                     pipeline = DiffusionPipeline.from_pretrained(
                         args.pretrained_model_name_or_path,
                         safety_checker=None,
-                        vae=AutoencoderKL.from_pretrained(args.pretrained_vae_name_or_path or args.pretrained_model_name_or_path,subfolder=None if args.pretrained_vae_name_or_path else "vae" ,safe_serialization=True),
+                        vae=AutoencoderKL.from_pretrained(args.pretrained_vae_name_or_path, safe_serialization=True),
                         torch_dtype=torch_dtype,
                         requires_safety_checker=False,
                     )
@@ -1008,7 +1010,7 @@ def main():
             args.pretrained_model_name_or_path,
             unet=unwrapped_unet,
             text_encoder=text_enc_model,
-            vae=AutoencoderKL.from_pretrained(args.pretrained_vae_name_or_path or args.pretrained_model_name_or_path,subfolder=None if args.pretrained_vae_name_or_path else "vae", safe_serialization=True),
+            vae=AutoencoderKL.from_pretrained(args.pretrained_vae_name_or_path, safe_serialization=True),
             safety_checker=None,
             torch_dtype=weight_dtype,
             local_files_only=False,
@@ -1171,7 +1173,7 @@ def main():
                     args.pretrained_model_name_or_path,
                     unet=unwrapped_unet,
                     text_encoder=text_enc_model,
-                    vae=AutoencoderKL.from_pretrained(args.pretrained_vae_name_or_path or args.pretrained_model_name_or_path,subfolder=None if args.pretrained_vae_name_or_path else "vae",),
+                    vae=AutoencoderKL.from_pretrained(args.pretrained_vae_name_or_path),
                     safety_checker=None,
                     torch_dtype=weight_dtype,
                     local_files_only=False,
