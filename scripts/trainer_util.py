@@ -119,6 +119,8 @@ class AverageMeter:
 
     @torch.no_grad()
     def update(self, val, n=1):
+        if val.isnan():
+            return
         eta = self.count / (self.count + n)
         if self.max_eta:
             eta = min(eta, self.max_eta ** n)

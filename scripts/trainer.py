@@ -1596,8 +1596,8 @@ def main():
 
                         if args.gan_ema == True:
                             update_ema(ema_discriminator, discriminator, 0.99)
-                        if not discriminator_loss.isnan():
-                            discriminator_loss_avg.update(discriminator_loss.detach_())
+                        discriminator_loss.detach_()
+                        discriminator_loss_avg.update(discriminator_loss)
                         
                         # Turn off learning for the discriminator for the generator optimization step
                         discriminator.requires_grad_(False)
@@ -1682,9 +1682,11 @@ def main():
                                 unet_stats[name] = (std.item(), mean.item())
                                 del std, mean
                         optimizer.zero_grad()
-                        loss_avg.update(base_loss.detach_())
-                        if args.with_gan and not gan_loss.isnan():
-                            gan_loss_avg.update(gan_loss.detach_())
+                        base_loss.detach_()
+                        loss_avg.update(base_loss)
+                        if args.with_gan:
+                            gan_loss.detach_()
+                            gan_loss_avg.update(gan_loss)
                         if args.use_ema == True:
                             update_ema(ema_unet, unet)
  
@@ -1693,18 +1695,21 @@ def main():
                             del model_pred_prior
 
                 logs = {}
+                raw_logs = {}
                 if args.train_unet:
                     logs["loss"] = loss_avg.avg.item()
-                    logs["lr"] = lr_scheduler.get_last_lr()[0]
+                    raw_logs["loss"] = base_loss.mean().item()
+                    logs["lr"] = raw_logs["lr"] = lr_scheduler.get_last_lr()[0]
                 elif args.with_gan:
-                    logs["lr"] = lr_scheduler_discriminator.get_last_lr()[0]
+                    logs["lr"] = raw_logs["lr"] = lr_scheduler_discriminator.get_last_lr()[0]
                 if args.with_gan:
                     logs["d_loss"] = discriminator_loss_avg.avg.item()
+                    raw_logs["d_loss"] = discriminator_loss.mean().item()
                 if args.train_unet and args.with_gan:
                     logs["gan_loss"] = gan_loss_avg.avg.item()
+                    raw_logs["gan_loss"] = gan_loss.mean().item()
                 progress_bar.set_postfix(**logs)
-                if not global_step % args.log_interval:
-                    accelerator.log(logs, step=global_step)
+                accelerator.log(raw_logs, step=global_step)
 
                 if global_step > 0 and args.sample_step_interval and not global_step % args.sample_step_interval:
                     save_and_sample_weights(global_step,'step',save_model=False)
