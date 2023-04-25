@@ -1576,10 +1576,16 @@ def main():
                             discriminator_input = torch.cat((target, model_pred), 0)
                         elif discriminator.config.prediction_type == "step":
                             next_timesteps = torch.clamp(timesteps - discriminator.config.step_count, min=0)
+                            predicted_latents = get_predicted_latents(noisy_latents, model_pred, timesteps, noise_scheduler)
+                            if (args.with_offset_noise == True):
+                                noise2 = torch.randn_like(latents) + (args.offset_noise_weight * torch.randn(latents.shape[0], latents.shape[1], 1, 1).to(accelerator.device))
+                            else:
+                                noise2 = torch.randn_like(latents)
                             discriminator_input = torch.cat((
-                                noise_scheduler.add_noise(latents, noise, next_timesteps),
-                                discriminator_target_fake(noisy_latents, model_pred, timesteps, next_timesteps, noise_scheduler)
+                                noise_scheduler.add_noise(latents, noise2, next_timesteps),
+                                noise_scheduler.add_noise(predicted_latents, noise2, next_timesteps),
                             ), 0)
+                            del predicted_latents, noise2
                         discriminator_input = torch.cat((noisy_latents.repeat(2, 1, 1, 1), discriminator_input), 1).detach()
                         discriminator_pred = discriminator(discriminator_input, timesteps.repeat(2), encoder_hidden_states.repeat(2, 1, 1))
                         discriminator_target = torch.cat((torch.ones(bsz, 1, device=accelerator.device), torch.zeros(bsz, 1, device=accelerator.device)), 0)
