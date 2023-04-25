@@ -31,15 +31,20 @@ class ResnetBlock(nn.Module):
         super().__init__()
         self.conv_in = ConvLayer(dim, dim, kernel_size=kernel_size, groups=groups)
         self.conv_out = ConvLayer(dim, dim, kernel_size=kernel_size, groups=groups)
-        self.embed_in = nn.Linear(time_embedding_dim, dim, bias=False)
         
         nn.init.zeros_(self.conv_out[2].weight)
         nn.init.zeros_(self.conv_out[2].bias)
-        nn.init.zeros_(self.embed_in.weight)
+        
+        if time_embedding_dim > 0:
+            self.embed_in = nn.Linear(time_embedding_dim, dim, bias=False)
+            nn.init.zeros_(self.embed_in.weight)
+        else:
+            self.embed_in = None
     
     def forward(self, input, time_embed):
         x = self.conv_in(input)
-        x = x + einops.rearrange(self.embed_in(time_embed), 'b c -> b c 1 1')
+        if self.embed_in:
+            x = x + einops.rearrange(self.embed_in(time_embed), 'b c -> b c 1 1')
         x = self.conv_out(x)
         return x + input
 
