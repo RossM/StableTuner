@@ -1573,15 +1573,17 @@ def main():
                         discriminator.requires_grad_(True)
 
                         if discriminator.config.prediction_type == "target":
-                            target_real = target
-                            target_fake = model_pred
+                            discriminator_input = torch.cat((target, model_pred), 0)
                         elif discriminator.config.prediction_type == "step":
                             next_timesteps = torch.clamp(timesteps - discriminator.config.step_count, min=0)
-                            target_real = noise_scheduler.add_noise(latents, noise, next_timesteps)
-                            target_fake = discriminator_target_fake(noisy_latents, model_pred, timesteps, next_timesteps, noise_scheduler)
-                        pred_fake = discriminator(torch.cat((noisy_latents, target_fake), 1).detach(), timesteps, encoder_hidden_states)
-                        pred_real = discriminator(torch.cat((noisy_latents, target_real), 1), timesteps, encoder_hidden_states)
-                        discriminator_loss = F.mse_loss(pred_fake, torch.zeros_like(pred_fake), reduction="mean") + F.mse_loss(pred_real, torch.ones_like(pred_real), reduction="mean")
+                            discriminator_input = torch.cat((
+                                noise_scheduler.add_noise(latents, noise, next_timesteps),
+                                discriminator_target_fake(noisy_latents, model_pred, timesteps, next_timesteps, noise_scheduler)
+                            ), 0)
+                        discriminator_input = torch.cat((noisy_latents.repeat(2, 1, 1, 1), discriminator_input), 1).detach()
+                        discriminator_pred = discriminator(discriminator_input, timesteps.repeat(2), encoder_hidden_states.repeat(2, 1, 1))
+                        discriminator_target = torch.cat((torch.ones(bsz, 1, device=accelerator.device), torch.zeros(bsz, 1, device=accelerator.device)), 0)
+                        discriminator_loss = 2 * F.mse_loss(discriminator_pred, discriminator_target, reduction="mean")
                         if discriminator_loss.isnan():
                             tqdm.write(f"{bcolors.WARNING}Discriminator loss is NAN, skipping GAN update.{bcolors.ENDC}")
                         else:
@@ -1599,7 +1601,7 @@ def main():
                                     discriminator_stats[name] = (std.item(), mean.item())
                                     del std, mean
                             optimizer_discriminator.zero_grad()
-                        del pred_real, pred_fake
+                        del discriminator_input, discriminator_pred, discriminator_target
 
                         if args.gan_ema == True:
                             update_ema(ema_discriminator, discriminator, 0.99)
