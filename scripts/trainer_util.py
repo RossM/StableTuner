@@ -140,6 +140,50 @@ def masked_mse_loss(predicted, target, mask, reduction="none"):
     masked_target = target * mask
     return F.mse_loss(masked_predicted, masked_target, reduction=reduction)
 
+@torch.no_grad()
+def discriminator_target_fake(noisy_latents, model_pred, timesteps, next_timesteps, noise_scheduler):
+    """
+    Computes the target latents for another timestep based on the the generator's input and output.
+    """
+    original_dtype = noisy_latents.dtype
+    noisy_latents = noisy_latents.float()
+    model_pred = model_pred.float()
+    
+    alphas_cumprod = noise_scheduler.alphas_cumprod
+    
+    sqrt_alpha_prod = alphas_cumprod[timesteps] ** 0.5
+    sqrt_alpha_prod = sqrt_alpha_prod.flatten()
+    while len(sqrt_alpha_prod.shape) < len(noisy_latents.shape):
+        sqrt_alpha_prod = sqrt_alpha_prod.unsqueeze(-1)
+        
+    sqrt_one_minus_alpha_prod = (1 - alphas_cumprod[timesteps]) ** 0.5
+    sqrt_one_minus_alpha_prod = sqrt_one_minus_alpha_prod.flatten()
+    while len(sqrt_one_minus_alpha_prod.shape) < len(noisy_latents.shape):
+        sqrt_one_minus_alpha_prod = sqrt_one_minus_alpha_prod.unsqueeze(-1)
+    
+    sqrt_alpha_prod_next = alphas_cumprod[next_timesteps] ** 0.5
+    sqrt_alpha_prod_next = sqrt_alpha_prod_next.flatten()
+    while len(sqrt_alpha_prod_next.shape) < len(noisy_latents.shape):
+        sqrt_alpha_prod_next = sqrt_alpha_prod_next.unsqueeze(-1)
+    
+    sqrt_one_minus_alpha_prod_next = (1 - alphas_cumprod[next_timesteps]) ** 0.5
+    sqrt_one_minus_alpha_prod_next = sqrt_one_minus_alpha_prod_next.flatten()
+    while len(sqrt_one_minus_alpha_prod_next.shape) < len(noisy_latents.shape):
+        sqrt_one_minus_alpha_prod_next = sqrt_one_minus_alpha_prod_next.unsqueeze(-1)
+    
+    if noise_scheduler.config.prediction_type == "epsilon":
+        predicted_latents = (noisy_latents - sqrt_one_minus_alpha_prod * model_pred) / sqrt_alpha_prod
+        predicted_noise = model_pred
+        return sqrt_alpha_prod_next * predicted_latents + sqrt_one_minus_alpha_prod_next * predicted_noise
+    elif noise_scheduler.config.prediction_type == "v-prediction":
+        predicted_latents = sqrt_alpha_prod * noisy_latents - sqrt_one_minus_alpha_prod * model_pred
+        predicted_noise = sqrt_one_minus_alpha_prod * noisy_latents + sqrt_alpha_prod * model_pred
+    else:
+        raise ValueError(f"Unknown prediction type {noise_scheduler.config.prediction_type}")
+
+    target_fake = sqrt_alpha_prod_next * predicted_latents + sqrt_one_minus_alpha_prod_next * predicted_noise
+    return target_fake.to(dtype=original_dtype).detach_()
+    
 # flash attention forwards and backwards
 # https://arxiv.org/abs/2205.14135
 

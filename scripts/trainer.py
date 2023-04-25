@@ -1572,8 +1572,15 @@ def main():
                         # Turn on learning for the discriminator, and do an optimization step
                         discriminator.requires_grad_(True)
 
-                        pred_fake = discriminator(torch.cat((noisy_latents, model_pred), 1).detach(), timesteps, encoder_hidden_states)
-                        pred_real = discriminator(torch.cat((noisy_latents, target), 1), timesteps, encoder_hidden_states)
+                        if discriminator.config.prediction_type == "target":
+                            target_real = target
+                            target_fake = model_pred
+                        elif discriminator.config.prediction_type == "step":
+                            next_timesteps = torch.clamp(timesteps - discriminator.config.step_count, min=0)
+                            target_real = noise_scheduler.add_noise(latents, noise, next_timesteps)
+                            target_fake = discriminator_target_fake(noisy_latents, model_pred, timesteps, next_timesteps, noise_scheduler)
+                        pred_fake = discriminator(torch.cat((noisy_latents, target_fake), 1).detach(), timesteps, encoder_hidden_states)
+                        pred_real = discriminator(torch.cat((noisy_latents, target_real), 1), timesteps, encoder_hidden_states)
                         discriminator_loss = F.mse_loss(pred_fake, torch.zeros_like(pred_fake), reduction="mean") + F.mse_loss(pred_real, torch.ones_like(pred_real), reduction="mean")
                         if discriminator_loss.isnan():
                             tqdm.write(f"{bcolors.WARNING}Discriminator loss is NAN, skipping GAN update.{bcolors.ENDC}")
@@ -1649,10 +1656,15 @@ def main():
                                 
                         if args.with_gan:
                             # Add loss from the GAN
+                            if discriminator.config.prediction_type == "target":
+                                target_fake = model_pred
+                            elif discriminator.config.prediction_type == "step":
+                                next_timesteps = torch.clamp(timesteps - discriminator.config.step_count, min=0)
+                                target_fake = discriminator_target_fake(noisy_latents, model_pred, timesteps, next_timesteps, noise_scheduler)
                             if args.gan_ema:
-                                pred_fake = ema_discriminator(torch.cat((noisy_latents, model_pred), 1), timesteps, encoder_hidden_states)
+                                pred_fake = ema_discriminator(torch.cat((noisy_latents, target_fake), 1), timesteps, encoder_hidden_states)
                             else:
-                                pred_fake = discriminator(torch.cat((noisy_latents, model_pred), 1), timesteps, encoder_hidden_states)
+                                pred_fake = discriminator(torch.cat((noisy_latents, target_fake), 1), timesteps, encoder_hidden_states)
                             gan_loss = F.mse_loss(pred_fake, torch.ones_like(pred_fake), reduction="mean")
                             if gan_loss.isnan():
                                 tqdm.write(f"{bcolors.WARNING}GAN loss is NAN, skipping GAN loss.{bcolors.ENDC}")

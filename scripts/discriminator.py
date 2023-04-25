@@ -143,8 +143,16 @@ class Discriminator2D(ModelMixin, ConfigMixin):
         embedding_dim: int = 768,
         time_embedding_dim: int = 128,
         reduction_type: str = "MeanMaxReduce",
+        prediction_type: str = "target",
+        step_count: int = None,
     ):
         super().__init__()
+        
+        if prediction_type == "step":
+            if step_count == None:
+                raise ValueError("Prediction type step requires that step_count be set")
+        elif prediction_type != "target":
+            raise ValueError(f"Unknown prediction type {prediction_type}")
         
         self.blocks = nn.ModuleList([])
         self.block_means = nn.ModuleList([])
