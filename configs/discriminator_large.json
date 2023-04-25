@@ -35,5 +35,6 @@
   "mlp_uses_norm": true,
   "out_channels": 1,
   "time_embedding_dim": 128,
-  "reduction_type": "AdaptiveReduce"
+  "reduction_type": "AdaptiveReduce",
+  "prediction_type": "target"
 }

@@ -140,7 +140,6 @@ def masked_mse_loss(predicted, target, mask, reduction="none"):
     masked_target = target * mask
     return F.mse_loss(masked_predicted, masked_target, reduction=reduction)
 
-@torch.no_grad()
 def get_predicted_latents(noisy_latents, model_pred, timesteps, noise_scheduler):
     """
     Computes the target latents for another timestep based on the the generator's input and output.
@@ -170,7 +169,7 @@ def get_predicted_latents(noisy_latents, model_pred, timesteps, noise_scheduler)
     else:
         raise ValueError(f"Unknown prediction type {noise_scheduler.config.prediction_type}")
 
-    return predicted_latents.to(dtype=original_dtype).detach_()
+    return predicted_latents.to(dtype=original_dtype)
     
 # flash attention forwards and backwards
 # https://arxiv.org/abs/2205.14135

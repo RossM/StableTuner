@@ -7,11 +7,11 @@
   ],
   "attention_heads": 8,
   "block_out_channels": [
-    64,
     128,
     256,
     512,
-    512
+    1024,
+    1024
   ],
   "block_repeats": [
     4,
@@ -28,13 +28,14 @@
   "groups": 32,
   "in_channels": 8,
   "mlp_hidden_channels": [
-    1024,
-    1024,
-    1024
+    2048,
+    2048,
+    2048
   ],
   "mlp_uses_norm": true,
   "out_channels": 1,
   "time_embedding_dim": 128,
   "reduction_type": "AdaptiveReduce",
-  "prediction_type": "target"
+  "prediction_type": "step",
+  "step_offset": -250
 }
