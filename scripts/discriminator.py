@@ -32,6 +32,10 @@ class ResnetBlock(nn.Module):
         self.conv_in = ConvLayer(dim, dim, kernel_size=kernel_size, groups=groups)
         self.conv_out = ConvLayer(dim, dim, kernel_size=kernel_size, groups=groups)
         self.embed_in = nn.Linear(time_embedding_dim, dim, bias=False)
+        
+        nn.init.zeros_(self.conv_out[2].weight)
+        nn.init.zeros_(self.conv_out[2].bias)
+        nn.init.zeros_(self.embed_in.weight)
     
     def forward(self, input, time_embed):
         x = self.conv_in(input)
@@ -60,6 +64,9 @@ class SelfAttention(nn.Module):
         self.to_v = nn.Linear(dim, value_dim)
         self.to_q = nn.Linear(dim, key_dim * heads)
         self.to_out = nn.Linear(value_dim * heads, out_dim)
+        
+        nn.init.zeros_(self.to_out.weight)
+        nn.init.zeros_(self.to_out.bias)
         
         self.use_efficient_attention = hasattr(F, "scaled_dot_product_attention")
 
@@ -177,7 +184,9 @@ class Discriminator2D(ModelMixin, ConfigMixin):
                 self.to_out.append(nn.GroupNorm(groups, c))
             self.to_out.append(nn.SiLU())
             d_channels = c
-        self.to_out.append(nn.Linear(d_channels, out_channels))
+        final_layer = nn.Linear(d_channels, out_channels)
+        nn.init.constant_(final_layer.bias, 0.5)
+        self.to_out.append(final_layer)
         
         self.gradient_checkpointing = False
     
