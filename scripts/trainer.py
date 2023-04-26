@@ -1568,37 +1568,19 @@ def main():
                     # True output: target
                     # Fake output: model_pred
 
-                    if args.with_gan:
+                    if args.with_gan:                    
                         # Turn on learning for the discriminator, and do an optimization step
                         discriminator.requires_grad_(True)
 
-                        if discriminator.config.prediction_type == "target":
-                            # In target mode, the discriminator predicts directly from the unet output
-                            discriminator_input = torch.cat((target, model_pred), 0)
-                        elif discriminator.config.prediction_type == "step":
-                            # In step mode, the discriminator gets the simulated result of stepping the denoising process several steps.
-                            next_timesteps = torch.clamp(timesteps + discriminator.config.step_offset, min=0, max=noise_scheduler.config.num_train_timesteps-1)
-                            predicted_latents = get_predicted_latents(noisy_latents, model_pred, timesteps, noise_scheduler)
-                            discriminator_input = torch.cat((
-                                noise_scheduler.add_noise(latents, noise, next_timesteps),
-                                noise_scheduler.add_noise(predicted_latents, noise, next_timesteps),
-                            ), 0)
-                            del predicted_latents
-                        elif discriminator.config.prediction_type == "noisy_step":
-                            # In noisy step mode, we take the predicted denoised latents and add new noise
-                            # This helps regularize the discriminator. See https://arxiv.org/abs/2206.02262
-                            next_timesteps = torch.clamp(timesteps + discriminator.config.step_offset, min=0, max=noise_scheduler.config.num_train_timesteps-1)
-                            predicted_latents = get_predicted_latents(noisy_latents, model_pred, timesteps, noise_scheduler)
-                            discriminator_input = torch.cat((
-                                noise_scheduler.add_noise(latents, torch.randn_like(latents), next_timesteps),
-                                noise_scheduler.add_noise(predicted_latents, torch.randn_like(latents), next_timesteps),
-                            ), 0)
-                            del predicted_latents
-                        if discriminator.config.in_channels > latents.shape[1]:
-                            # Most discriminator modes get both the unet input and output
-                            discriminator_input = torch.cat((noisy_latents.repeat(2, 1, 1, 1), discriminator_input), 1).detach()
-                        else:
-                            discriminator_input.detach_()
+                        discriminator_input = get_discriminator_input(
+                            discriminator=discriminator,
+                            noise_scheduler=noise_scheduler,
+                            noisy_latents=noisy_latents.repeat(2, 1, 1, 1),
+                            model_pred=torch.cat((target, model_pred), 0),
+                            timesteps=timesteps.repeat(2),
+                            noise=noise.repeat(2, 1, 1, 1),
+                        )
+                        discriminator_input.detach_()
                         discriminator_pred = discriminator(discriminator_input, timesteps.repeat(2), encoder_hidden_states.repeat(2, 1, 1))
                         discriminator_target = torch.cat((torch.ones(bsz, 1, device=accelerator.device), torch.zeros(bsz, 1, device=accelerator.device)), 0)
                         discriminator_loss = 2 * F.mse_loss(discriminator_pred, discriminator_target, reduction="mean")
@@ -1676,20 +1658,14 @@ def main():
                                 
                         if args.with_gan:
                             # Add loss from the GAN
-                            if discriminator.config.prediction_type == "target":
-                                discriminator_input = model_pred
-                            elif discriminator.config.prediction_type == "step":
-                                next_timesteps = torch.clamp(timesteps + discriminator.config.step_offset, min=0, max=noise_scheduler.config.num_train_timesteps-1)
-                                predicted_latents = get_predicted_latents(noisy_latents, model_pred, timesteps, noise_scheduler)
-                                discriminator_input = noise_scheduler.add_noise(predicted_latents, noise, next_timesteps),
-                                del predicted_latents
-                            elif discriminator.config.prediction_type == "noisy_step":
-                                next_timesteps = torch.clamp(timesteps + discriminator.config.step_offset, min=0, max=noise_scheduler.config.num_train_timesteps-1)
-                                predicted_latents = get_predicted_latents(noisy_latents, model_pred, timesteps, noise_scheduler)
-                                discriminator_input = noise_scheduler.add_noise(predicted_latents, torch.randn_like(latents), next_timesteps)
-                                del predicted_latents
-                            if discriminator.config.in_channels > latents.shape[1]:
-                                discriminator_input = torch.cat((noisy_latents, discriminator_input), 1)
+                            discriminator_input = get_discriminator_input(
+                                discriminator=discriminator,
+                                noise_scheduler=noise_scheduler,
+                                noisy_latents=noisy_latents,
+                                model_pred=model_pred,
+                                timesteps=timesteps,
+                                noise=noise,
+                            )
                             if args.gan_ema:
                                 discriminator_pred = ema_discriminator(discriminator_input, timesteps, encoder_hidden_states)
                             else:
