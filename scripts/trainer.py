@@ -1604,7 +1604,7 @@ def main():
                         del discriminator_input, discriminator_pred, discriminator_target
 
                         if args.gan_ema == True:
-                            update_ema(ema_discriminator, discriminator, 0.99)
+                            update_ema(ema_discriminator, discriminator, 0.9)
                         discriminator_loss.detach_()
                         discriminator_loss_avg.update(discriminator_loss)
                         
