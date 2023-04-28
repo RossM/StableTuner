@@ -6,6 +6,7 @@ from typing import Optional
 import torch
 import torch.nn.functional as F
 import torch.utils.checkpoint
+import einops
 from accelerate.logging import get_logger
 from accelerate.utils import set_seed
 from diffusers import AutoencoderKL, DDIMScheduler, DDPMScheduler, DiffusionPipeline, UNet2DConditionModel,DiffusionPipeline, DPMSolverMultistepScheduler,EulerDiscreteScheduler
@@ -181,6 +182,12 @@ def get_discriminator_input(
         timesteps: Tensor,
         noise: Tensor,
     ):
+    # Discriminator training combined positive and negative model_pred into a single batch, so repeat
+    # the other arguments until they're the right batch size
+    noisy_latents = batch_repeat(noisy_latents, model_pred.shape[0] // noisy_latents.shape[0])
+    timesteps = batch_repeat(timesteps, model_pred.shape[0] // timesteps.shape[0])
+    noise = batch_repeat(noise, model_pred.shape[0] // noise.shape[0])
+    
     if discriminator.config.prediction_type == "target":
         # In target mode, the discriminator predicts directly from the unet output
         discriminator_input = model_pred
@@ -203,6 +210,11 @@ def get_discriminator_input(
         discriminator_input = torch.cat((noisy_latents, discriminator_input), 1)
 
     return discriminator_input
+    
+def batch_repeat(x, count):
+    if count == 1:
+        return x
+    return einops.repeat(x, 'b ... -> (c b) ...', c=count)
     
 # flash attention forwards and backwards
 # https://arxiv.org/abs/2205.14135

@@ -1575,10 +1575,10 @@ def main():
                         discriminator_input = get_discriminator_input(
                             discriminator=discriminator,
                             noise_scheduler=noise_scheduler,
-                            noisy_latents=noisy_latents.repeat(2, 1, 1, 1),
+                            noisy_latents=noisy_latents,
                             model_pred=torch.cat((target, model_pred), 0),
-                            timesteps=timesteps.repeat(2),
-                            noise=noise.repeat(2, 1, 1, 1),
+                            timesteps=timesteps,
+                            noise=noise,
                         )
                         discriminator_input.detach_()
                         discriminator_pred = discriminator(discriminator_input, timesteps.repeat(2), encoder_hidden_states.repeat(2, 1, 1))
