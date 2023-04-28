@@ -1726,7 +1726,10 @@ def main():
                     logs["gan_loss"] = gan_loss_avg.avg.item()
                     raw_logs["gan_loss"] = gan_loss.mean().item()
                 progress_bar.set_postfix(**logs)
-                accelerator.log(raw_logs, step=global_step)
+                try:
+                    accelerator.log(raw_logs, step=global_step)
+                except:
+                    pass
 
                 if global_step > 0 and args.sample_step_interval and not global_step % args.sample_step_interval:
                     save_and_sample_weights(global_step,'step',save_model=False)
