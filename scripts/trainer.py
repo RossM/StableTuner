@@ -409,6 +409,14 @@ def parse_args():
         default=None,
         help="Initial learning rate (after the potential warmup period) to use for the discriminator. Defaults to same as --learning-rate.",
     )
+    parser.add_argument(
+        "--with_perturbation_noise",
+        default=False,
+        action=argparse.BooleanOptionalAction,
+        help="Flag to apply perturbation noise to latents.",
+    )
+    parser.add_argument("--perturbation_noise_weight", type=float, default=0.1, help="The weight of perturbation noise applied during training.")
+
     args = parser.parse_args()
     env_local_rank = int(os.environ.get("LOCAL_RANK", -1))
     if env_local_rank != -1 and env_local_rank != args.local_rank:
@@ -1527,6 +1535,7 @@ def main():
                         noise = torch.randn_like(latents) + (args.offset_noise_weight * torch.randn(latents.shape[0], latents.shape[1], 1, 1).to(accelerator.device))
                     else:
                         noise = torch.randn_like(latents)
+                    
 
                     bsz = latents.shape[0]
                     # Sample a random timestep for each image
@@ -1535,7 +1544,11 @@ def main():
 
                     # Add noise to the latents according to the noise magnitude at each timestep
                     # (this is the forward diffusion process)
-                    noisy_latents = noise_scheduler.add_noise(latents, noise, timesteps)
+                    if args.with_perturbation_noise:
+                        # https://arxiv.org/pdf/2301.11706.pdf
+                        noisy_latents = noise_scheduler.add_noise(latents, noise + args.perturbation_noise_weight * torch.randn_like(latents), timesteps)
+                    else:
+                        noisy_latents = noise_scheduler.add_noise(latents, noise, timesteps)
 
                     # Get the text embedding for conditioning
                     with text_enc_context:
