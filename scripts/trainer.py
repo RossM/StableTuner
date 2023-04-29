@@ -403,6 +403,12 @@ def parse_args():
     parser.add_argument('--run_name', type=str, default=None, help="Adds a custom identifier to the sample and checkpoint directories")
     parser.add_argument('--gan_ema', default=False, action=argparse.BooleanOptionalAction, help="Use GAN EMA (experimental)")
     parser.add_argument('--train_unet', default=True, action=argparse.BooleanOptionalAction)
+    parser.add_argument(
+        "--discriminator_learning_rate",
+        type=float,
+        default=None,
+        help="Initial learning rate (after the potential warmup period) to use for the discriminator. Defaults to same as --learning-rate.",
+    )
     args = parser.parse_args()
     env_local_rank = int(os.environ.get("LOCAL_RANK", -1))
     if env_local_rank != -1 and env_local_rank != args.local_rank:
@@ -617,6 +623,10 @@ def main():
         args.learning_rate = (
             args.learning_rate * args.gradient_accumulation_steps * args.train_batch_size * accelerator.num_processes
         )
+        if args.discriminator_learning_rate != None:
+            args.discriminator_learning_rate = (
+                args.discriminator_learning_rate * args.gradient_accumulation_steps * args.train_batch_size * accelerator.num_processes
+            )
 
     # Use 8-bit Adam for lower memory usage or to fine-tune the model in 16GB GPUs
     if args.use_8bit_adam and args.use_deepspeed_adam==False and args.use_lion==False:
@@ -656,7 +666,7 @@ def main():
         if args.with_gan:
             optimizer_discriminator = optimizer_class(
                 discriminator.parameters(),
-                lr=args.learning_rate,
+                lr=args.discriminator_learning_rate or args.learning_rate,
                 betas=(args.adam_beta1, args.adam_beta2),
                 weight_decay=args.adam_weight_decay,
                 eps=args.adam_epsilon,
@@ -673,7 +683,7 @@ def main():
         if args.with_gan:
             optimizer_discriminator = optimizer_class(
                 discriminator.parameters(),
-                lr=args.learning_rate,
+                lr=args.discriminator_learning_rate or args.learning_rate,
                 betas=(args.adam_beta1, args.adam_beta2),
                 weight_decay=args.adam_weight_decay,
                 #eps=args.adam_epsilon,
